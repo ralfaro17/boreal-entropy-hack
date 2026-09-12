@@ -1,0 +1,12 @@
+/env
+/venv
+.venv
+__pycache__/
+*.py[cod]
+.pnpm-store
+node_modules
+.env
+.env.local
+.env.prod
+/uv
+/.mypy_cache
