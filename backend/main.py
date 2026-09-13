@@ -1577,6 +1577,132 @@ async def websocket_stt_endpoint(
             await stt_session.__aexit__(None, None, None)
 
 
+class AgentReplyPayload(PydanticBaseModel):
+    customer_id: str
+    message: str  # final transcript of what the customer just said
+
+
+@app.post("/voice/agent-reply", tags=["Voice"])
+async def voice_agent_reply(payload: AgentReplyPayload, db: Session = Depends(get_db)):
+    """AI voice-agent turn: take the customer's transcribed utterance, persist it,
+    run distress guardrails, and return a compliant assistant reply for TTS playback.
+
+    Returns {reply, escalated}: when escalated is true, callers must stop the
+    automated loop and hand off to a human specialist (reply is the handoff notice).
+    """
+    customer = db.get(models.Customer, payload.customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    text = payload.message.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="message must not be empty")
+
+    convo = get_or_create_active_conversation(db, customer.id)
+
+    is_distressed, cats = detect_customer_distress(text)
+    db.add(models.Message(
+        conversation_id=convo.id,
+        role=models.MessageRole.USER,
+        content=f"[voice] {text}"[:2000],
+        created_at=datetime.utcnow(),
+        was_flagged=is_distressed,
+    ))
+    db.commit()
+
+    if is_distressed:
+        if not convo.is_escalated:
+            convo.is_escalated = True
+            convo.escalated_at = datetime.utcnow()
+            convo.escalation_reason = f"Distress detected in AI voice call: {', '.join(cats)}"
+            record_conversation_event(
+                db=db,
+                conversation_id=convo.id,
+                event_type=models.ConversationEventType.CUSTOMER_DISTRESS_DETECTED,
+                title="Customer Distress Detected (AI Voice Call)",
+                description=f"Distress detected during AI voice call ({', '.join(cats)}).",
+                metadata={"categories": cats, "trigger_snippet": text[:200]},
+            )
+            record_conversation_event(
+                db=db,
+                conversation_id=convo.id,
+                event_type=models.ConversationEventType.SPECIALIST_HANDOFF,
+                title="AI Voice Agent Paused — Human Handoff",
+                description="Automated voice agent stopped; customer routed to human hardship specialist.",
+                metadata={"channel": "voice"},
+            )
+        lang = "en" if re.search(r"\b(job|money|afford|hospital|evict|funeral|laid off)\b", text.lower()) else "es"
+        reply = get_escalation_reply(lang)
+        escalated = True
+    else:
+        reply = await generate_customer_chat_reply(
+            db=db, customer=customer, convo=convo, user_message=text
+        )
+        escalated = False
+
+    db.add(models.Message(
+        conversation_id=convo.id,
+        role=models.MessageRole.ASSISTANT,
+        content=f"[voice] {reply}"[:2000],
+        created_at=datetime.utcnow(),
+        was_flagged=False,
+    ))
+    convo.last_message_at = datetime.utcnow()
+    db.commit()
+
+    return {"reply": reply, "escalated": escalated, "conversation_id": convo.id}
+
+
+@app.get("/voice/greeting/{customer_id}", tags=["Voice"])
+async def voice_agent_greeting(customer_id: str, db: Session = Depends(get_db)):
+    """Opening line for an AI-initiated call: a compliant payment reminder for the
+    customer's next pending installment (falls back to a generic greeting)."""
+    customer = db.get(models.Customer, customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    payment = (
+        db.query(models.Payment)
+        .join(models.Account)
+        .filter(models.Account.customer_id == customer.id)
+        .filter(models.Payment.payment_date.is_(None))
+        .order_by(models.Payment.due_date.asc())
+        .first()
+    )
+    if payment:
+        risk = (
+            db.query(models.RiskFeature)
+            .filter_by(customer_id=customer.id)
+            .order_by(models.RiskFeature.as_of_date.desc())
+            .first()
+        )
+        act = (
+            db.query(models.AccountActivity)
+            .filter_by(customer_id=customer.id)
+            .order_by(models.AccountActivity.snapshot_date.desc())
+            .first()
+        )
+        greeting = await generate_risk_reminder(customer, payment, risk, act, language="en")
+    else:
+        greeting = (
+            f"Hello {customer.full_name}, this is the Boreal Bank assistant. "
+            f"We're checking in to see how we can support you with your account. How can we help today?"
+        )
+
+    convo = get_or_create_active_conversation(db, customer.id)
+    db.add(models.Message(
+        conversation_id=convo.id,
+        role=models.MessageRole.ASSISTANT,
+        content=f"[voice] {greeting}"[:2000],
+        created_at=datetime.utcnow(),
+        was_flagged=False,
+    ))
+    convo.last_message_at = datetime.utcnow()
+    db.commit()
+
+    return {"greeting": greeting, "conversation_id": convo.id}
+
+
 class TTSPayload(PydanticBaseModel):
     text: str
     model: str | None = None

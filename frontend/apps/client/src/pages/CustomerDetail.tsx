@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Pencil, Plus } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/page-header';
@@ -175,10 +175,16 @@ export function CustomerDetail() {
             title={customer.full_name}
             description={customer.email}
             action={
-              <Button variant="outline" onClick={() => setEditOpen(true)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                {t('common.edit')}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => navigate(`/ai-call?customer=${customer.id}`)}>
+                  <Bot className="mr-2 h-4 w-4" />
+                  {t('aiCall.startCall')}
+                </Button>
+                <Button variant="outline" onClick={() => setEditOpen(true)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  {t('common.edit')}
+                </Button>
+              </div>
             }
           />
         </div>

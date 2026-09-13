@@ -10,6 +10,8 @@ import { Payments } from './pages/Payments';
 import { Chat } from './pages/Chat';
 import { CustomerChat } from './pages/CustomerChat';
 import { Call } from './pages/Call';
+import { AICall } from './pages/AICall';
+import { CustomerCallPortal } from './pages/CustomerCallPortal';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +42,7 @@ function App() {
           {/* Customer Portal route: users can view & respond to AI reminders */}
           <Route path="/chat/:customerId" element={<CustomerChat />} />
           <Route path="/portal/chat/:customerId" element={<CustomerChat />} />
+          <Route path="/portal/call/:customerId" element={<CustomerCallPortal />} />
 
           {/* Internal Console routes */}
           <Route
@@ -87,6 +90,14 @@ function App() {
             element={
               <InternalLayout>
                 <Call />
+              </InternalLayout>
+            }
+          />
+          <Route
+            path="/ai-call"
+            element={
+              <InternalLayout>
+                <AICall />
               </InternalLayout>
             }
           />
