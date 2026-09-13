@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "type": "module",
+  "name": "my-monorepo-frontend",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": "24.x"
+  }
+}
