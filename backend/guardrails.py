@@ -512,12 +512,12 @@ OFF_TOPIC_RULES: list[OffTopicRule] = [
 
 OFF_TOPIC_REFUSALS = {
     "es": (
-        "Como asistente de Boreal Bank, únicamente puedo orientarte sobre temas relacionados con "
+        "Como asistente de Bancobranza, únicamente puedo orientarte sobre temas relacionados con "
         "tus cuentas bancarias, cuotas, estados de cuenta y opciones de pago. "
         "¿Deseas que revisemos los detalles o alternativas para tu cuota pendiente?"
     ),
     "en": (
-        "As a Boreal Bank assistant, I can only assist with inquiries regarding your bank accounts, "
+        "As a Bancobranza assistant, I can only assist with inquiries regarding your bank accounts, "
         "installments, account statements, and payment arrangement options. "
         "Would you like to review options for your pending installment?"
     ),

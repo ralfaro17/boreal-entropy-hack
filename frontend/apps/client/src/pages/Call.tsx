@@ -145,7 +145,7 @@ export function Call() {
       graphRef.current = createCallAudioGraph(micStream);
 
       const suffix = Math.random().toString(36).slice(2, 8);
-      const peer = new Peer(`boreal-${suffix}`, { debug: 1 });
+      const peer = new Peer(`bancobranza-${suffix}`, { debug: 1 });
       peerRef.current = peer;
 
       peer.on('open', (id) => {
@@ -318,7 +318,7 @@ export function Call() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t('call.remoteId')}</label>
                   <Input
-                    placeholder="boreal-xxxxxx"
+                    placeholder="bancobranza-xxxxxx"
                     value={remotePeerId}
                     onChange={(e) => setRemotePeerId(e.target.value)}
                     className="font-mono text-xs"

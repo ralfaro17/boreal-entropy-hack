@@ -212,12 +212,12 @@ class TestOffTopicGuardrails:
 
     def test_off_topic_refusal_messages(self):
         refusal_es = get_off_topic_refusal("es")
-        assert "Boreal Bank" in refusal_es
+        assert "Bancobranza" in refusal_es
         assert "cuota" in refusal_es
         assert check_compliance_violations(refusal_es) == []
 
         refusal_en = get_off_topic_refusal("en")
-        assert "Boreal Bank" in refusal_en
+        assert "Bancobranza" in refusal_en
         assert "installment" in refusal_en
         assert check_compliance_violations(refusal_en) == []
 

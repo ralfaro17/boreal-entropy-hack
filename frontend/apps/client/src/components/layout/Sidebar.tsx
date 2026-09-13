@@ -68,7 +68,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
       </div>
       <div className="leading-tight">
         <span className={cn('font-bold tracking-tight', compact ? 'text-base' : 'text-[15px]')}>
-          Boreal <span className="text-primary">Entropy</span>
+          Banco<span className="text-primary">branza</span>
         </span>
         {!compact && (
           <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">

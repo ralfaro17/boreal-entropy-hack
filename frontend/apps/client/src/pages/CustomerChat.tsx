@@ -278,7 +278,7 @@ export function CustomerChat() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-semibold text-sm sm:text-base leading-tight">
-                  Boreal Bank • {isSpanish ? 'Asistencia Financiera' : 'Financial Support'}
+                  Bancobranza • {isSpanish ? 'Asistencia Financiera' : 'Financial Support'}
                 </h1>
                 <Badge
                   variant="outline"
@@ -366,7 +366,7 @@ export function CustomerChat() {
               <MessageSquare className="h-5 w-5" />
             </div>
             <h3 className="font-semibold text-sm">
-              {isSpanish ? 'Canal Oficial de Apoyo y Pagos Boreal' : 'Official Boreal Payment & Support Channel'}
+              {isSpanish ? 'Canal Oficial de Apoyo y Pagos Bancobranza' : 'Official Bancobranza Payment & Support Channel'}
             </h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
               {isSpanish

@@ -66,7 +66,7 @@ let turnSeq = 0;
 
 /**
  * AI outbound call console. Select a customer, click "Start AI Call":
- *   1. Dials the customer's portal (deterministic peer id boreal-cust-{id}).
+ *   1. Dials the customer's portal (deterministic peer id bancobranza-cust-{id}).
  *   2. On answer, speaks a compliant reminder greeting (backend-generated).
  *   3. Captures the customer's remote audio -> /ws/stt -> on each final
  *      transcript, POST /voice/agent-reply -> TTS reply into the call.

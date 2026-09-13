@@ -13,7 +13,7 @@ type PortalStatus = 'connecting' | 'waiting' | 'ringing' | 'in-call' | 'ended' |
 
 /**
  * Customer-facing call portal. Registers this browser under a deterministic
- * peer id (boreal-cust-{customerId}) so the bank's AI agent can dial it.
+ * peer id (bancobranza-cust-{customerId}) so the bank's AI agent can dial it.
  * Shows an incoming-call screen with explicit Answer / Decline.
  */
 export function CustomerCallPortal() {
@@ -119,7 +119,7 @@ export function CustomerCallPortal() {
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
             <Snowflake className="h-7 w-7" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">Boreal Bank</h1>
+          <h1 className="text-xl font-bold tracking-tight">Bancobranza</h1>
           <p className="text-sm opacity-90">{t('portalCall.subtitle')}</p>
         </div>
 

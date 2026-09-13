@@ -725,7 +725,7 @@ def test_guardrails_rejection_and_distress_escalation():
 
         redirect_msg = ws.receive_json()
         assert redirect_msg["sender_name"] == "Payment Assistant"
-        assert "Boreal Bank" in redirect_msg["text"]
+        assert "Bancobranza" in redirect_msg["text"]
         assert "cuota" in redirect_msg["text"]
 
     # 10. Verify audit event for off-topic interception was recorded in conversation_events

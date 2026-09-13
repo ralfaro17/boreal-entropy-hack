@@ -201,7 +201,7 @@ async def load_history(db: Session, conversation_id: str) -> list[dict]:
 # 3. Prompt construction — tone and compliance rules baked in
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT_TEMPLATE_ES = """Eres un asistente de recordatorio y asesoría de pagos para Boreal Bank. Tu labor \
+SYSTEM_PROMPT_TEMPLATE_ES = """Eres un asistente de recordatorio y asesoría de pagos para Bancobranza. Tu labor \
 es ayudar a {name} a mantenerse al día con su pago próximo o vencido mediante una conversación de chat \
 breve, empática, cálida y sin juzgar — jamás a través de la presión ni la intimidación.
 
@@ -230,7 +230,7 @@ Reglas estrictas e inviolables:
 - Utiliza el historial para dar continuidad natural a la conversación.
 """
 
-SYSTEM_PROMPT_TEMPLATE_EN = """You are a payment reminder assistant for Boreal Bank. Your job \
+SYSTEM_PROMPT_TEMPLATE_EN = """You are a payment reminder assistant for Bancobranza. Your job \
 is to help {name} stay on top of an upcoming or overdue payment through a short, \
 warm, non-judgmental chat conversation — never through pressure.
 

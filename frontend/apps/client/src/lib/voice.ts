@@ -5,12 +5,12 @@
 
 /** Deterministic PeerJS id for a customer's call portal (so the AI agent can dial them). */
 export function customerPeerId(customerId: string): string {
-  return `boreal-cust-${customerId}`;
+  return `bancobranza-cust-${customerId}`;
 }
 
 /** Deterministic-prefix PeerJS id for the AI agent side (random suffix avoids collisions). */
 export function agentPeerId(): string {
-  return `boreal-agent-${Math.random().toString(36).slice(2, 8)}`;
+  return `bancobranza-agent-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export interface TranscriptEvent {
