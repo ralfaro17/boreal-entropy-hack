@@ -379,14 +379,14 @@ def analyze_customer_tone(
             "- El cliente realiza consultas estándar de forma tranquila.\n"
             "- Tono de voz: Cortés, cálido, profesional y equilibrado.\n"
             "- Cadencia: Natural y fluida a velocidad estándar.\n"
-            "- Propósito: Atender la consulta y orientar amablemente sobre sus cuotas de Bancobranza."
+            "- Propósito: Atender la consulta y orientar amablemente sobre sus cuotas de Banco Agrícola."
         )
         directive_en = (
             "TONE ADAPTATION DIRECTIVE (STATE: NEUTRAL / PROFESSIONAL):\n"
             "- The customer is inquiring calmly in a standard dialogue.\n"
             "- Voice tone: Courteous, warm, professional, and balanced.\n"
             "- Cadence: Natural and fluid at standard pacing.\n"
-            "- Objective: Address the inquiry attentively and guide them on their Bancobranza account."
+            "- Objective: Address the inquiry attentively and guide them on their Banco Agrícola account."
         )
 
     return CustomerToneProfile(

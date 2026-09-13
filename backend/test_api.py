@@ -846,6 +846,72 @@ def test_voice_agent_reply_and_tone_adaptation():
     print("✓ Voice agent reply and tone adaptation endpoint passed")
 
 
+def test_banco_agricola_protocol():
+    """Verify that agent greetings and reminders adhere to Banco Agrícola banking protocol."""
+    cust_email = f"agricola.test.{uuid.uuid4().hex[:6]}@example.com"
+    payload = {
+        "full_name": "Carlos Mendoza",
+        "email": cust_email,
+        "credit_score": 710,
+    }
+    res = client.post("/customers", json=payload)
+    assert res.status_code == 201
+    cust_id = res.json()["id"]
+
+    # 1. Voice greeting without pending payment introduces Banco Agrícola with security notice
+    greet_res = client.get(f"/voice/greeting/{cust_id}")
+    assert greet_res.status_code == 200
+    greet_data = greet_res.json()
+    greeting_text = greet_data["greeting"]
+
+    assert "Banco Agrícola" in greeting_text
+    assert "Carlos Mendoza" in greeting_text
+    assert "asistente virtual" in greeting_text.lower()
+    assert "seguridad" in greeting_text.lower() or "contraseñas" in greeting_text.lower()
+
+    # 2. Add account and overdue payment to verify reminder greeting protocol
+    acc_res = client.post(
+        "/accounts",
+        json={
+            "customer_id": cust_id,
+            "product_type": "credit_card",
+            "principal_amount": 450.0,
+            "interest_rate": 0.199,
+        },
+    )
+    assert acc_res.status_code == 201
+    acc_id = acc_res.json()["id"]
+
+    from datetime import date, timedelta
+    overdue_date = (date.today() - timedelta(days=5)).isoformat()
+    pay_res = client.post(
+        "/payments",
+        json={
+            "account_id": acc_id,
+            "amount_due": 125.50,
+            "due_date": overdue_date,
+            "status": "late",
+        },
+    )
+    assert pay_res.status_code == 201
+
+    greet_pay_res = client.get(f"/voice/greeting/{cust_id}")
+    assert greet_pay_res.status_code == 200
+    pay_greeting = greet_pay_res.json()["greeting"]
+    assert "Banco Agrícola" in pay_greeting
+    assert "Carlos Mendoza" in pay_greeting
+    assert "125.50" in pay_greeting
+    assert "seguridad" in pay_greeting.lower() or "contraseñas" in pay_greeting.lower()
+
+    # 3. Off-topic refusal mentions Banco Agrícola
+    from guardrails import get_off_topic_refusal
+    refusal_es = get_off_topic_refusal("es")
+    assert "Banco Agrícola" in refusal_es
+    assert "Bancobranza" in refusal_es
+
+    print("✓ Banco Agrícola banking protocol verification passed")
+
+
 if __name__ == "__main__":
     test_system_endpoints()
     test_customer_crud()
@@ -859,6 +925,7 @@ if __name__ == "__main__":
     test_guardrails_rejection_and_distress_escalation()
     test_voice_interrupt()
     test_voice_agent_reply_and_tone_adaptation()
+    test_banco_agricola_protocol()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
 
 

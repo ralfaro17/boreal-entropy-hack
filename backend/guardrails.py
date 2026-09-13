@@ -512,12 +512,12 @@ OFF_TOPIC_RULES: list[OffTopicRule] = [
 
 OFF_TOPIC_REFUSALS = {
     "es": (
-        "Como asistente de Bancobranza, únicamente puedo orientarte sobre temas relacionados con "
-        "tus cuentas bancarias, cuotas, estados de cuenta y opciones de pago. "
-        "¿Deseas que revisemos los detalles o alternativas para tu cuota pendiente?"
+        "Como asistente virtual de Banco Agrícola en Bancobranza, únicamente puedo orientarle sobre temas relacionados con "
+        "sus cuentas bancarias, cuotas, estados de cuenta y opciones de pago. "
+        "¿Desea que revisemos los detalles o alternativas para su cuota pendiente?"
     ),
     "en": (
-        "As a Bancobranza assistant, I can only assist with inquiries regarding your bank accounts, "
+        "As a Banco Agrícola virtual assistant on Bancobranza, I can only assist with inquiries regarding your bank accounts, "
         "installments, account statements, and payment arrangement options. "
         "Would you like to review options for your pending installment?"
     ),

@@ -29,6 +29,7 @@ import {
 import {
   Bot,
   Phone,
+  PhoneCall,
   PhoneOff,
   Mic,
   MicOff,
@@ -46,6 +47,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { getChannelPreference } from '@/lib/channel-preference';
+import { startRingtone, type RingtoneController } from '@/lib/ringtone';
 
 export interface ToneProfile {
   customer_tone: string;
@@ -120,6 +122,7 @@ export function AICall() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentAiTextRef = useRef<string>('');
   const lastAiTurnIdRef = useRef<number | null>(null);
+  const ringtoneRef = useRef<RingtoneController | null>(null);
 
   const setAiSpeakingState = useCallback((speaking: boolean) => {
     aiSpeakingRef.current = speaking;
@@ -167,6 +170,10 @@ export function AICall() {
 
   const cleanup = useCallback((finalStatus: AgentStatus = 'ended') => {
     stoppedRef.current = true;
+    if (ringtoneRef.current) {
+      ringtoneRef.current.stop();
+      ringtoneRef.current = null;
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -319,6 +326,10 @@ export function AICall() {
     setToneProfile(null);
     setStatus('dialing');
 
+    // Start dialing ringback supervisory tone
+    ringtoneRef.current?.stop();
+    ringtoneRef.current = startRingtone({ mode: 'ringback', volume: 0.15 });
+
     try {
       // Mic is required by getUserMedia/WebRTC even though the agent mostly
       // listens. It starts MUTED: an open agent mic re-captures room audio and
@@ -336,6 +347,8 @@ export function AICall() {
       peerRef.current = peer;
 
       peer.on('error', (err) => {
+        ringtoneRef.current?.stop();
+        ringtoneRef.current = null;
         if (err.type === 'peer-unavailable') {
           showErrorToast(t('aiCall.customerOffline'));
           cleanup('idle');
@@ -355,6 +368,10 @@ export function AICall() {
 
       call.on('stream', (remote) => {
         void (async () => {
+          if (ringtoneRef.current) {
+            ringtoneRef.current.stop();
+            ringtoneRef.current = null;
+          }
           setStatus('in-call');
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remote;
@@ -427,6 +444,8 @@ export function AICall() {
         if (!stoppedRef.current) cleanup('ended');
       });
     } catch (e) {
+      ringtoneRef.current?.stop();
+      ringtoneRef.current = null;
       showErrorToast(e instanceof Error ? e.message : 'Failed to start call');
       cleanup('idle');
       setStatus('idle');
@@ -500,10 +519,11 @@ export function AICall() {
                 </CardDescription>
               </div>
               <Badge
-                variant={status === 'in-call' ? 'default' : status === 'escalated' ? 'destructive' : 'secondary'}
-                className="ml-auto capitalize"
+                variant={status === 'in-call' ? 'default' : status === 'escalated' ? 'destructive' : status === 'dialing' ? 'outline' : 'secondary'}
+                className={`ml-auto capitalize ${status === 'dialing' ? 'border-primary text-primary animate-pulse' : ''}`}
               >
                 {status === 'in-call' && <Radio className="h-3 w-3 mr-1 animate-pulse" />}
+                {status === 'dialing' && <PhoneCall className="h-3 w-3 mr-1 animate-pulse" />}
                 {status}
               </Badge>
             </div>
@@ -610,7 +630,7 @@ export function AICall() {
               <div className="flex gap-2">
                 <Button variant="destructive" className="flex-1" onClick={hangUp}>
                   <PhoneOff className="mr-2 h-4 w-4" />
-                  {t('aiCall.endCall')}
+                  {status === 'dialing' ? t('aiCall.cancelCall') : t('aiCall.endCall')}
                 </Button>
                 <Button
                   variant={agentMicOn ? 'default' : 'outline'}

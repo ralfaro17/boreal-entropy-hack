@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { customerPeerId } from '@/lib/voice';
 import { customersApi, type Customer } from '@/lib/api';
 import { Phone, PhoneOff, PhoneIncoming, Mic, MicOff, Radio, Snowflake } from 'lucide-react';
+import { startRingtone, type RingtoneController } from '@/lib/ringtone';
 
 type PortalStatus = 'connecting' | 'waiting' | 'ringing' | 'in-call' | 'ended' | 'error';
 
@@ -29,6 +30,7 @@ export function CustomerCallPortal() {
   const pendingCallRef = useRef<MediaConnection | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneRef = useRef<RingtoneController | null>(null);
 
   useEffect(() => {
     if (!customerId) return;
@@ -44,8 +46,21 @@ export function CustomerCallPortal() {
     peer.on('call', (incoming) => {
       pendingCallRef.current = incoming;
       setStatus('ringing');
+      ringtoneRef.current?.stop();
+      ringtoneRef.current = startRingtone({ mode: 'incoming', volume: 0.22 });
+
+      incoming.on('close', () => {
+        if (pendingCallRef.current === incoming) {
+          ringtoneRef.current?.stop();
+          ringtoneRef.current = null;
+          pendingCallRef.current = null;
+          setStatus('waiting');
+        }
+      });
     });
     peer.on('error', (err) => {
+      ringtoneRef.current?.stop();
+      ringtoneRef.current = null;
       if (err.type === 'unavailable-id') {
         setError(t('portalCall.idTaken'));
       } else {
@@ -55,6 +70,8 @@ export function CustomerCallPortal() {
     });
 
     return () => {
+      ringtoneRef.current?.stop();
+      ringtoneRef.current = null;
       callRef.current?.close();
       micStreamRef.current?.getTracks().forEach((tr) => tr.stop());
       peer.destroy();
@@ -62,6 +79,8 @@ export function CustomerCallPortal() {
   }, [customerId, t]);
 
   const answer = useCallback(async () => {
+    ringtoneRef.current?.stop();
+    ringtoneRef.current = null;
     const incoming = pendingCallRef.current;
     if (!incoming) return;
     try {
@@ -90,12 +109,16 @@ export function CustomerCallPortal() {
   }, [t]);
 
   const decline = () => {
+    ringtoneRef.current?.stop();
+    ringtoneRef.current = null;
     pendingCallRef.current?.close();
     pendingCallRef.current = null;
     setStatus('waiting');
   };
 
   const endCall = () => {
+    ringtoneRef.current?.stop();
+    ringtoneRef.current = null;
     callRef.current?.close();
     callRef.current = null;
     micStreamRef.current?.getTracks().forEach((tr) => tr.stop());
