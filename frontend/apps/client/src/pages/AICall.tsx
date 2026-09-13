@@ -29,6 +29,10 @@ import {
   Bot,
   Phone,
   PhoneOff,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
   Activity,
   AlertTriangle,
   Radio,
@@ -76,6 +80,8 @@ export function AICall() {
   const [turns, setTurns] = useState<TurnLine[]>([]);
   const [emotion, setEmotion] = useState<EmotionEvent | null>(null);
   const [aiSpeaking, setAiSpeaking] = useState(false);
+  const [agentMicOn, setAgentMicOn] = useState(false);
+  const [monitorOn, setMonitorOn] = useState(false);
 
   const peerRef = useRef<Peer | null>(null);
   const callRef = useRef<MediaConnection | null>(null);
@@ -126,12 +132,14 @@ export function AICall() {
     });
   };
 
-  /** Speak text into the call via backend TTS; disable listening while talking. */
+  /** Speak text into the call via backend TTS; disable listening while talking.
+   * localMonitor=false: the AI voice reaches the agent through the portal side;
+   * playing it locally too causes an echo/double-audio effect. */
   const speak = useCallback(async (text: string, language = 'es') => {
     if (!graphRef.current) return;
     setAiSpeaking(true);
     try {
-      await graphRef.current.playTts(text, { language });
+      await graphRef.current.playTts(text, { language, localMonitor: false });
     } catch {
       showErrorToast(t('aiCall.ttsError'));
     } finally {
@@ -174,10 +182,14 @@ export function AICall() {
 
     try {
       // Mic is required by getUserMedia/WebRTC even though the agent mostly
-      // listens; the supervisor can also speak through it if needed.
+      // listens. It starts MUTED: an open agent mic re-captures room audio and
+      // causes echo/doubled voices (especially when demoing on one machine).
+      // The supervisor can unmute to barge in.
       const mic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      mic.getAudioTracks().forEach((tr) => (tr.enabled = false));
+      setAgentMicOn(false);
       micStreamRef.current = mic;
       graphRef.current = createCallAudioGraph(mic);
 
@@ -207,8 +219,10 @@ export function AICall() {
           setStatus('in-call');
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remote;
+            remoteAudioRef.current.muted = true; // monitor off by default (echo prevention)
             void remoteAudioRef.current.play().catch(() => undefined);
           }
+          setMonitorOn(false);
 
           // STT + emotion over the *customer's* remote audio.
           // persist=false: /voice/agent-reply persists each utterance itself.
@@ -260,6 +274,23 @@ export function AICall() {
   }, [customerId, cleanup, handleCustomerUtterance, speak, t]);
 
   const hangUp = () => cleanup('ended');
+
+  const toggleAgentMic = () => {
+    const stream = micStreamRef.current;
+    if (!stream) return;
+    const next = !agentMicOn;
+    stream.getAudioTracks().forEach((tr) => (tr.enabled = next));
+    setAgentMicOn(next);
+  };
+
+  /** Local playback of the customer's audio. OFF by default: when demoing on
+   * one machine it replays the speaker's own voice (perceived as echo). STT
+   * capture is unaffected — it taps the stream directly, not the audio element. */
+  const toggleMonitor = () => {
+    const next = !monitorOn;
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = !next;
+    setMonitorOn(next);
+  };
 
   const selectedCustomer = customers?.find((c) => c.id === customerId);
   const portalPath = customerId ? `/portal/call/${customerId}` : '';
@@ -346,10 +377,34 @@ export function AICall() {
                 {t('aiCall.startCall')}
               </Button>
             ) : (
-              <Button variant="destructive" className="w-full" onClick={hangUp}>
-                <PhoneOff className="mr-2 h-4 w-4" />
-                {t('aiCall.endCall')}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="destructive" className="flex-1" onClick={hangUp}>
+                  <PhoneOff className="mr-2 h-4 w-4" />
+                  {t('aiCall.endCall')}
+                </Button>
+                <Button
+                  variant={agentMicOn ? 'default' : 'outline'}
+                  size="icon"
+                  onClick={toggleAgentMic}
+                  title={agentMicOn ? t('aiCall.micOn') : t('aiCall.micOff')}
+                >
+                  {agentMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant={monitorOn ? 'default' : 'outline'}
+                  size="icon"
+                  onClick={toggleMonitor}
+                  title={monitorOn ? t('aiCall.monitorOn') : t('aiCall.monitorOff')}
+                >
+                  {monitorOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                </Button>
+              </div>
+            )}
+            {inSession && (
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                {agentMicOn ? t('aiCall.micOnHint') : t('aiCall.micOffHint')}{' '}
+                {monitorOn ? t('aiCall.monitorOnHint') : t('aiCall.monitorOffHint')}
+              </p>
             )}
 
             {status === 'escalated' && selectedCustomer && (

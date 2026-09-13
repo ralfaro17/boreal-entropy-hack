@@ -32,7 +32,15 @@
     "noTurns": "The conversation will appear here once the customer answers",
     "escalatedBanner": "Distress detected — AI agent paused and customer routed to a human specialist.",
     "ttsError": "Failed to synthesize AI speech (check DEEPGRAM_API_KEY)",
-    "replyError": "Failed to generate AI reply"
+    "replyError": "Failed to generate AI reply",
+    "micOn": "Your microphone is live in the call",
+    "micOff": "Your microphone is muted (click to barge in)",
+    "micOnHint": "Your mic is LIVE — the customer can hear you.",
+    "micOffHint": "Your mic is muted; the AI handles the conversation.",
+    "monitorOn": "Listening to the customer's audio",
+    "monitorOff": "Customer audio muted locally (click to listen in)",
+    "monitorOnHint": "Customer audio is playing on this device.",
+    "monitorOffHint": "Customer audio muted locally to prevent echo when demoing on one machine."
   },
   "portalCall": {
     "subtitle": "Secure voice line",

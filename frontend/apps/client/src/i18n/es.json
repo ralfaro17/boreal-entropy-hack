@@ -32,7 +32,15 @@
     "noTurns": "La conversación aparecerá aquí cuando el cliente conteste",
     "escalatedBanner": "Angustia detectada — agente IA pausado y cliente derivado a un especialista humano.",
     "ttsError": "Error al sintetizar la voz de la IA (verifica DEEPGRAM_API_KEY)",
-    "replyError": "Error al generar la respuesta de la IA"
+    "replyError": "Error al generar la respuesta de la IA",
+    "micOn": "Tu micrófono está activo en la llamada",
+    "micOff": "Tu micrófono está silenciado (haz clic para intervenir)",
+    "micOnHint": "Tu micrófono está ACTIVO — el cliente puede escucharte.",
+    "micOffHint": "Tu micrófono está silenciado; la IA maneja la conversación.",
+    "monitorOn": "Escuchando el audio del cliente",
+    "monitorOff": "Audio del cliente silenciado localmente (clic para escuchar)",
+    "monitorOnHint": "El audio del cliente se reproduce en este dispositivo.",
+    "monitorOffHint": "Audio del cliente silenciado localmente para evitar eco al hacer demos en una sola máquina."
   },
   "portalCall": {
     "subtitle": "Línea de voz segura",
