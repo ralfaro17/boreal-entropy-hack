@@ -712,7 +712,28 @@ def test_guardrails_rejection_and_distress_escalation():
     assert all("left the chat" not in m["content"] for m in msgs)
     assert all(m["role"] in ("user", "assistant") for m in msgs)
 
-    print("✓ Guardrails operator rejection, distress escalation, and compliance audit events passed")
+    # 9. Verify off-topic query (e.g. cake recipe, LaTeX, coding) is intercepted with polite banking redirection
+    with client.websocket_connect(f"/ws/chat/{cust_id}?sender_name=Customer") as ws:
+        ws.receive_json()
+        ws.receive_json()
+
+        off_topic_q = "¿Cómo puedo preparar una torta de chocolate y hornear galletas?"
+        ws.send_text(json.dumps({"text": off_topic_q, "sender_name": "Customer"}))
+
+        echo_msg = ws.receive_json()
+        assert echo_msg["text"] == off_topic_q
+
+        redirect_msg = ws.receive_json()
+        assert redirect_msg["sender_name"] == "Payment Assistant"
+        assert "Boreal Bank" in redirect_msg["text"]
+        assert "cuota" in redirect_msg["text"]
+
+    # 10. Verify audit event for off-topic interception was recorded in conversation_events
+    events_res = client.get(f"/conversations/{escalated_convo['id']}/events")
+    events = events_res.json()
+    assert any(e["event_type"] == "guardrail_violation_blocked" for e in events)
+
+    print("✓ Guardrails operator rejection, distress escalation, off-topic defense, and compliance audit events passed")
 
 
 

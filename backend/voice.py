@@ -43,7 +43,7 @@ DEEPGRAM_STT_URL = (
     "&interim_results=true&punctuate=true&smart_format=true&model=nova-2"
 )
 DEEPGRAM_TTS_URL = "https://api.deepgram.com/v1/speak"
-DEFAULT_TTS_MODEL = "aura-2-asteria-en"
+DEFAULT_TTS_MODEL = "aura-2-asteria-es"
 
 
 def stt_available() -> bool:

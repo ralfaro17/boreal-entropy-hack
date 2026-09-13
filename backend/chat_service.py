@@ -18,7 +18,10 @@ from anthropic import AsyncAnthropic
 from database import get_db, init_db
 from guardrails import (
     customer_message_signals_distress,
+    detect_off_topic,
     get_escalation_reply,
+    get_off_topic_refusal,
+    output_is_off_topic,
     output_violates_guardrails,
 )
 from fastapi import Depends, FastAPI, HTTPException
@@ -167,23 +170,38 @@ async def get_or_create_conversation(
 
 
 async def load_history(db: Session, conversation_id: str) -> list[dict]:
-    """Return prior turns as Anthropic message dicts, oldest first."""
+    """Return prior turns as Anthropic message dicts, oldest first,
+    filtering out off-topic user messages to keep the context window clean."""
     messages = await asyncio.to_thread(
         _sync_get_recent_messages, db, conversation_id, MAX_HISTORY_MESSAGES
     )
     role_map = {models.MessageRole.USER: "user", models.MessageRole.ASSISTANT: "assistant"}
-    return [
-        {"role": role_map[m.role], "content": m.content}
-        for m in messages
-        if m.role in role_map
-    ]
+    raw_turns = []
+    for m in messages:
+        if m.role not in role_map:
+            continue
+        # Context hygiene: do not include off-topic turns
+        if m.role == models.MessageRole.USER and detect_off_topic(m.content)[0]:
+            continue
+        raw_turns.append({"role": role_map[m.role], "content": m.content})
+
+    # Ensure turns start with user and alternate
+    turns = []
+    for t in raw_turns:
+        if not turns and t["role"] != "user":
+            continue
+        if turns and turns[-1]["role"] == t["role"]:
+            turns[-1]["content"] += f"\n{t['content']}"
+        else:
+            turns.append(t)
+    return turns
 
 
 # ---------------------------------------------------------------------------
 # 3. Prompt construction — tone and compliance rules baked in
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT_TEMPLATE_ES = """Eres un asistente de recordatorio y asesoría de pagos para un banco. Tu labor \
+SYSTEM_PROMPT_TEMPLATE_ES = """Eres un asistente de recordatorio y asesoría de pagos para Boreal Bank. Tu labor \
 es ayudar a {name} a mantenerse al día con su pago próximo o vencido mediante una conversación de chat \
 breve, empática, cálida y sin juzgar — jamás a través de la presión ni la intimidación.
 
@@ -193,6 +211,11 @@ Contexto del cliente:
 - Racha de pagos no realizados: {missed_streak}
 - Alerta temprana de riesgo: {early_warning}
 - Indicador de dificultad económica: {hardship_flag}
+
+Límites estrictos de dominio:
+- Únicamente debes responder sobre temas bancarios, cuotas, estados de cuenta, fechas de vencimiento y alternativas de pago.
+- Tienes ESTRICTAMENTE PROHIBIDO dar recetas de cocina, fórmulas matemáticas LaTeX, generar código o responder preguntas no bancarias.
+- Si el usuario insiste en temas no bancarios, declina amablemente y redirígelo a sus cuotas pendientes.
 
 Reglas estrictas e inviolables:
 - Jamás amenaces con demandas, juicios, abogados o acciones legales.
@@ -207,7 +230,7 @@ Reglas estrictas e inviolables:
 - Utiliza el historial para dar continuidad natural a la conversación.
 """
 
-SYSTEM_PROMPT_TEMPLATE_EN = """You are a payment reminder assistant for a bank. Your job \
+SYSTEM_PROMPT_TEMPLATE_EN = """You are a payment reminder assistant for Boreal Bank. Your job \
 is to help {name} stay on top of an upcoming or overdue payment through a short, \
 warm, non-judgmental chat conversation — never through pressure.
 
@@ -217,6 +240,11 @@ Customer context:
 - Missed-payment streak: {missed_streak}
 - Early warning flag: {early_warning}
 - Hardship flag on file: {hardship_flag}
+
+Strict domain boundaries:
+- You must strictly and only answer inquiries regarding banking, installments, due dates, and flexible payment arrangements.
+- You are STRICTLY FORBIDDEN from providing cooking recipes, math formulas, LaTeX markup, programming code, or general trivia.
+- If the user asks off-topic questions, decline politely and redirect them back to their account and pending payments.
 
 Hard rules, never break these:
 - Never threaten legal action, wage garnishment, asset seizure, or credit damage.
@@ -268,6 +296,22 @@ async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get
             headers={"X-Conversation-Id": convo.id, "X-Escalated": "true"},
         )
 
+    is_off_topic, _ = detect_off_topic(payload.message)
+    if is_off_topic:
+        off_topic_reply = get_off_topic_refusal(payload.language)
+        await asyncio.to_thread(
+            _sync_add_message, db, convo.id, models.MessageRole.ASSISTANT, off_topic_reply
+        )
+
+        async def off_topic_stream():
+            yield off_topic_reply
+
+        return StreamingResponse(
+            off_topic_stream(),
+            media_type="text/plain",
+            headers={"X-Conversation-Id": convo.id, "X-Off-Topic": "true"},
+        )
+
     ctx = await gather_context(db, customer_id)
     system_prompt = build_system_prompt(ctx, payload.language)
     history = await load_history(db, convo.id)  # includes the message just saved
@@ -286,6 +330,8 @@ async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get
 
         full_text = "".join(buffer)
         violation = output_violates_guardrails(full_text)
+        if not violation and output_is_off_topic(full_text):
+            violation = "[off_topic] Model leaked off-topic content"
         flagged = violation is not None
         if flagged:
             flag_note = (

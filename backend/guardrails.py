@@ -373,11 +373,16 @@ def check_compliance_violations(text: str) -> list[ComplianceViolation]:
 
 def output_violates_guardrails(text: str) -> str | None:
     """Convenience checker returning the pattern / description of the first violation found,
-    or None if the text complies with all debt prevention standards.
+    or None if the text complies with all debt prevention standards and domain boundaries.
     """
     violations = check_compliance_violations(text)
     if violations:
         return f"[{violations[0].category}] {violations[0].description} ('{violations[0].matched_text}')"
+
+    is_off, cat = detect_off_topic(text)
+    if is_off:
+        return f"[off_topic_violation] Content breaches domain boundary (category: {cat})"
+
     return None
 
 
@@ -438,3 +443,113 @@ ESCALATION_REPLIES = {
 def get_escalation_reply(language: str = "es") -> str:
     """Return an empathetic, non-punitive specialist handoff message in the requested language."""
     return ESCALATION_REPLIES.get(language.lower(), ESCALATION_REPLIES["es"])
+
+
+# ===========================================================================
+# 5. OFF-TOPIC & DOMAIN BOUNDARY GUARDRAILS (Anti-Drift / Anti-Jailbreak)
+# ===========================================================================
+
+@dataclass(frozen=True)
+class OffTopicRule:
+    category: str
+    pattern: str
+    description: str
+
+
+OFF_TOPIC_RULES: list[OffTopicRule] = [
+    # Culinary / Cooking / Recipes
+    OffTopicRule(
+        category="culinary_recipe",
+        pattern=r"\b(receta(s)?|ingredientes?|como (cocinar|hornear)|(receta de|como (preparar|cocinar|hornear|hacer)) (un |una )?(tarta|pastel|torta|galleta(s)?|postre|pan|sopa|bizcocho|comida)|tarta|pastel|torta|galletas|precalienta(r)? el horno|harina de trigo|polvo de hornear)\b",
+        description="Consulta sobre recetas o cocina",
+    ),
+    OffTopicRule(
+        category="culinary_recipe",
+        pattern=r"\b(recipe(s)?|ingredients?|how to (cook|bake)|(recipe for|how to (bake|cook|make)) (a |an )?(cake|pie|cookie(s)?|dessert|bread|soup|pastry|meal)|cake|pie|cookies|chocolate cake|preheat the oven|cup(s)? of flour)\b",
+        description="Cooking or food recipe inquiry",
+    ),
+    # Mathematics / LaTeX / Physics formulas
+    OffTopicRule(
+        category="math_latex",
+        pattern=r"(\\begin\{|\\frac\{|\\sqrt\{|\\int|\\sum|\\cdot|\$\$|\\\[|\\mathrm|\\alpha|\\beta|\\theta|\\partial)",
+        description="LaTeX mathematical typesetting markup",
+    ),
+    OffTopicRule(
+        category="math_latex",
+        pattern=r"\b(latex|ecuacion(es)? diferencial(es)?|teorema de pitagoras|integral definida|derivada(s)? parcial(es)?|formula cuadratica)\b",
+        description="Consulta académica sobre matemáticas o fórmulas LaTeX",
+    ),
+    OffTopicRule(
+        category="math_latex",
+        pattern=r"\b(differential equation(s)?|pythagorean theorem|quadratic formula|eigenvalue(s)?|fourier transform)\b",
+        description="Academic mathematics or physics request",
+    ),
+    # Coding / Scripting / Code Generation
+    OffTopicRule(
+        category="coding_scripting",
+        pattern=r"\b(escribe|generar?|hazme|crear?|write|generate|give me)\s+(un\s+|una\s+|a\s+|an\s+)?((python|javascript|java|c\+\+|c#|bash|powershell|rust|sql|html)\s+(script|codigo|code|programa|program|funcion|function)|(script|codigo|code|programa|program|funcion|function)\s+(en\s+|in\s+|de\s+)?(python|javascript|java|c\+\+|c#|bash|powershell|rust|sql|html))\b",
+        description="Solicitud de código de programación o scripts",
+    ),
+    OffTopicRule(
+        category="coding_scripting",
+        pattern=r"(```(python|javascript|bash|c|cpp|java|rust|go|php|ruby)|import requests|def main\(\)|console\.log\(|public static void main)",
+        description="Fragmento o bloque de código de programación",
+    ),
+    # Jailbreak / Roleplay Manipulation / Persona Escape
+    OffTopicRule(
+        category="jailbreak_roleplay",
+        pattern=r"\b(ignora (todas )?las instrucciones|ignore (all )?(previous )?instructions|dan mode|jailbreak|olvida tu rol|forget your role|act as an unrestricted|pretend you are|haz como si fueras|ahora eres un)\b",
+        description="Intento de evasión de rol o jailbreak",
+    ),
+    # Creative writing / General trivia / Homework
+    OffTopicRule(
+        category="creative_trivia",
+        pattern=r"\b(escribe un poema|write a poem|cuentame un chiste|tell me a joke|escribe una cancion|write a song|cuentame un cuento|tell me a story|quien (gano|descubrio|invento)|who (won|discovered|invented)|cual es la capital de|what is the capital of)\b",
+        description="Solicitud de poesía, chistes o trivia general",
+    ),
+]
+
+
+OFF_TOPIC_REFUSALS = {
+    "es": (
+        "Como asistente de Boreal Bank, únicamente puedo orientarte sobre temas relacionados con "
+        "tus cuentas bancarias, cuotas, estados de cuenta y opciones de pago. "
+        "¿Deseas que revisemos los detalles o alternativas para tu cuota pendiente?"
+    ),
+    "en": (
+        "As a Boreal Bank assistant, I can only assist with inquiries regarding your bank accounts, "
+        "installments, account statements, and payment arrangement options. "
+        "Would you like to review options for your pending installment?"
+    ),
+}
+
+
+def detect_off_topic(text: str) -> tuple[bool, str | None]:
+    """Detect if a user's message is asking for off-topic non-banking content
+    (e.g., cake recipes, LaTeX formulas, coding, jailbreak manipulation).
+    Returns (is_off_topic, detected_category_or_None).
+    """
+    if not text or not text.strip():
+        return False, None
+
+    normalized = strip_accents(text)
+    for rule in OFF_TOPIC_RULES:
+        # Check both normalized text and raw text (so backslashes in LaTeX are preserved)
+        if re.search(rule.pattern, normalized, flags=re.IGNORECASE) or re.search(rule.pattern, text, flags=re.IGNORECASE):
+            return True, rule.category
+
+    return False, None
+
+
+def get_off_topic_refusal(language: str = "es") -> str:
+    """Return a polite, firm refusal redirecting the customer to their bank account and installments."""
+    return OFF_TOPIC_REFUSALS.get(language.lower(), OFF_TOPIC_REFUSALS["es"])
+
+
+def output_is_off_topic(text: str) -> bool:
+    """Post-generation check: verify that the assistant's output does not inadvertently leak
+    LaTeX math blocks, cooking recipes, or code snippets.
+    """
+    is_off, _ = detect_off_topic(text)
+    return is_off
+
