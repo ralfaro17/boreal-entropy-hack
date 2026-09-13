@@ -19,7 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 
 @asynccontextmanager
@@ -815,6 +815,62 @@ async def post_room_message(room_id: str, payload: schemas.ChatMessagePayload):
     )
     await chat_manager.broadcast(room_id, msg)
     return msg
+
+
+@app.get("/conversations", tags=["Chat"])
+@app.get("/chat/conversations", tags=["Chat"])
+def list_conversations(
+    customer_id: str | None = Query(None, description="Filter by customer ID"),
+    db: Session = Depends(get_db),
+):
+    """List all existing conversations with latest activity and customer details."""
+    query = (
+        select(models.Conversation)
+        .options(
+            joinedload(models.Conversation.customer),
+            selectinload(models.Conversation.messages),
+        )
+        .order_by(models.Conversation.last_message_at.desc())
+    )
+    if customer_id:
+        query = query.filter(models.Conversation.customer_id == customer_id)
+    conversations = db.execute(query).scalars().all()
+    result = []
+    for c in conversations:
+        last_msg = c.messages[-1].content if c.messages else None
+        result.append({
+            "id": c.id,
+            "customer_id": c.customer_id,
+            "customer_name": c.customer.full_name if c.customer else "Unknown Customer",
+            "customer_email": c.customer.email if c.customer else None,
+            "started_at": c.started_at.isoformat() if c.started_at else None,
+            "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None,
+            "channel": c.channel.value if c.channel else "app",
+            "is_escalated": c.is_escalated,
+            "message_count": len(c.messages),
+            "last_message": last_msg,
+        })
+    return result
+
+
+@app.get("/conversations/{conversation_id}/messages", tags=["Chat"])
+@app.get("/chat/conversations/{conversation_id}/messages", tags=["Chat"])
+def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db)):
+    """Retrieve all messages belonging to a conversation."""
+    convo = db.get(models.Conversation, conversation_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return [
+        {
+            "id": m.id,
+            "conversation_id": m.conversation_id,
+            "role": m.role.value,
+            "content": m.content,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "flagged": m.was_flagged,
+        }
+        for m in convo.messages
+    ]
 
 
 @app.get("/chat/{room_id}", response_class=HTMLResponse, tags=["Chat"])

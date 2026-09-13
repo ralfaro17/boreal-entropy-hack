@@ -36,6 +36,7 @@ export default defineConfig({
         ws: true,
       },
       '/chat': apiProxy(),
+      '/conversations': apiProxy(),
       '/docs': apiProxy(),
       '/redoc': apiProxy(),
       '/openapi.json': apiProxy(),

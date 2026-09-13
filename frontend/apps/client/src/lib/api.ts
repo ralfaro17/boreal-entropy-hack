@@ -146,6 +146,15 @@ export const riskFeaturesApi = {
     request<void>(`/risk-features/${id}`, { method: 'DELETE' }),
 };
 
+// Conversations
+export const conversationsApi = {
+  list: (params?: { customer_id?: string }) =>
+    request<Conversation[]>('/conversations', { params }),
+
+  getMessages: (conversationId: string) =>
+    request<ConversationMessage[]>(`/conversations/${conversationId}/messages`),
+};
+
 // Types
 export type EmploymentStatus = 'employed' | 'self_employed' | 'unemployed' | 'retired' | 'student';
 export type ProductType = 'mortgage' | 'personal_loan' | 'credit_card' | 'auto_loan';
@@ -370,4 +379,26 @@ export interface EarlyWarning {
   debt_to_income_ratio: number | null;
   credit_utilization_pct: number | null;
   balance_trend_30d: number | null;
+}
+
+export interface Conversation {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_email?: string | null;
+  started_at: string | null;
+  last_message_at: string | null;
+  channel: Channel | null;
+  is_escalated: boolean;
+  message_count: number;
+  last_message: string | null;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversation_id?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at: string | null;
+  flagged: boolean;
 }

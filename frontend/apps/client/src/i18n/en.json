@@ -110,7 +110,19 @@
   },
   "chat": {
     "title": "Chat",
-    "description": "Real-time messaging"
+    "description": "Customer conversations and messaging history",
+    "conversations": "Conversations",
+    "noConversations": "No conversations found",
+    "search": "Search conversations...",
+    "viewConversation": "View Messages",
+    "customer": "Customer",
+    "channel": "Channel",
+    "status": "Status",
+    "messages": "Messages",
+    "lastMessage": "Last Message",
+    "lastActive": "Last Active",
+    "escalated": "Escalated",
+    "normal": "Standard"
   },
   "employment": {
     "employed": "Employed",

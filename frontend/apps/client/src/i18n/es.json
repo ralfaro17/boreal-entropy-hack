@@ -110,7 +110,19 @@
   },
   "chat": {
     "title": "Chat",
-    "description": "Mensajería en tiempo real"
+    "description": "Historial de conversaciones y mensajes con clientes",
+    "conversations": "Conversaciones",
+    "noConversations": "No se encontraron conversaciones",
+    "search": "Buscar conversaciones...",
+    "viewConversation": "Ver mensajes",
+    "customer": "Cliente",
+    "channel": "Canal",
+    "status": "Estado",
+    "messages": "Mensajes",
+    "lastMessage": "Último mensaje",
+    "lastActive": "Última actividad",
+    "escalated": "Escalado",
+    "normal": "Estándar"
   },
   "employment": {
     "employed": "Empleado",
