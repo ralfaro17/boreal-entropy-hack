@@ -92,6 +92,13 @@ Interactive documentation with try-it-out capabilities is available at `/docs`.
 - `DELETE /risk-features/{feature_id}`: Delete risk feature record
 - `GET /customers/{customer_id}/early-warning`: Real-time early-warning risk indicator for prevention
 
+### Chat & WhatsApp Simulation (`/ws/chat`, `/chat`)
+- `WEBSOCKET /ws/chat/{room_id}`: Real-time multi-room WebSocket endpoint (`?sender_name=<name>`)
+- `GET /chat/rooms`: List currently active chat rooms and user counts
+- `GET /chat/rooms/{room_id}/messages`: Get recent message history for a room
+- `POST /chat/rooms/{room_id}/messages`: Inject message into a room via REST (e.g. debt alert bots, notifications) and broadcast to active WebSockets
+- `GET /chat/{room_id}`: Interactive WhatsApp-styled web chat interface for real-time simulation in your browser
+
 ## Working with Models
 
 Models use modern SQLAlchemy 2.0 declarative syntax:

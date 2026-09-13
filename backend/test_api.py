@@ -467,6 +467,94 @@ def test_cascade_delete():
     print("✓ Cascade delete verification passed")
 
 
+def test_websocket_chat_rooms():
+    import json
+
+    room_a = f"room_a_{uuid.uuid4().hex[:6]}"
+    room_b = f"room_b_{uuid.uuid4().hex[:6]}"
+
+    # 1. Connect Alice to room_a
+    with client.websocket_connect(f"/ws/chat/{room_a}?sender_name=Alice") as ws_alice:
+        # Alice receives "Alice joined the chat"
+        msg = ws_alice.receive_json()
+        assert msg["type"] == "system"
+        assert "Alice joined" in msg["text"]
+
+        # 2. Connect Bob to room_a
+        with client.websocket_connect(f"/ws/chat/{room_a}?sender_name=Bob") as ws_bob:
+            # Bob receives history first
+            history_event = ws_bob.receive_json()
+            assert history_event["type"] == "history"
+            assert len(history_event["messages"]) >= 1
+
+            # Bob receives "Bob joined the chat"
+            bob_join = ws_bob.receive_json()
+            assert bob_join["type"] == "system"
+            assert "Bob joined" in bob_join["text"]
+
+            # Alice also receives "Bob joined the chat"
+            alice_saw_bob = ws_alice.receive_json()
+            assert alice_saw_bob["type"] == "system"
+            assert "Bob joined" in alice_saw_bob["text"]
+
+            # 3. Alice sends message in room_a
+            ws_alice.send_text(json.dumps({
+                "sender_name": "Alice",
+                "text": "Hi Bob, how can I help you today?"
+            }))
+
+            # Both Alice and Bob should receive Alice's message
+            msg_for_alice = ws_alice.receive_json()
+            assert msg_for_alice["text"] == "Hi Bob, how can I help you today?"
+            assert msg_for_alice["sender_name"] == "Alice"
+
+            msg_for_bob = ws_bob.receive_json()
+            assert msg_for_bob["text"] == "Hi Bob, how can I help you today?"
+            assert msg_for_bob["sender_name"] == "Alice"
+
+            # 4. Multi-room isolation: Connect Charlie to room_b
+            with client.websocket_connect(f"/ws/chat/{room_b}?sender_name=Charlie") as ws_charlie:
+                charlie_join = ws_charlie.receive_json()
+                assert charlie_join["type"] == "system"
+
+                # Charlie sends a message in room_b
+                ws_charlie.send_text("Hello Room B only!")
+                charlie_msg = ws_charlie.receive_json()
+                assert charlie_msg["text"] == "Hello Room B only!"
+
+                # 5. REST message injection into room_a
+                inject_res = client.post(
+                    f"/chat/rooms/{room_a}/messages",
+                    json={"sender_name": "Debt Alert Bot", "text": "Reminder: payment due in 3 days"},
+                )
+                assert inject_res.status_code == 201
+
+                # Alice and Bob in room_a receive the injected alert
+                bot_msg_alice = ws_alice.receive_json()
+                assert bot_msg_alice["sender_name"] == "Debt Alert Bot"
+                assert "payment due" in bot_msg_alice["text"]
+
+                bot_msg_bob = ws_bob.receive_json()
+                assert bot_msg_bob["sender_name"] == "Debt Alert Bot"
+
+    # 6. Verify REST room and message endpoints
+    rooms_res = client.get("/chat/rooms")
+    assert rooms_res.status_code == 200
+
+    messages_res = client.get(f"/chat/rooms/{room_a}/messages")
+    assert messages_res.status_code == 200
+    room_a_messages = messages_res.json()
+    assert len(room_a_messages) >= 3
+    assert any(m["sender_name"] == "Debt Alert Bot" for m in room_a_messages)
+
+    # 7. Verify WhatsApp HTML UI endpoint
+    ui_res = client.get(f"/chat/{room_a}")
+    assert ui_res.status_code == 200
+    assert "WhatsApp Chat Simulator" in ui_res.text
+    assert room_a in ui_res.text
+    print("✓ WebSocket chat rooms and multi-room simulation passed")
+
+
 if __name__ == "__main__":
     test_system_endpoints()
     test_customer_crud()
@@ -475,5 +563,6 @@ if __name__ == "__main__":
     test_account_activity_crud()
     test_risk_feature_crud_and_early_warning()
     test_cascade_delete()
+    test_websocket_chat_rooms()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
 

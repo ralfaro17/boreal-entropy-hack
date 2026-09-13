@@ -1,12 +1,25 @@
+import json
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import models
 import schemas
+from chat import chat_manager
 from database import check_db_connection, get_db, init_db
 
 
@@ -736,3 +749,79 @@ def early_warning_status(customer_id: str, db: Session = Depends(get_db)):
         if latest.balance_trend_30d is not None
         else None,
     }
+
+
+# ===========================================================================
+# WebSocket & WhatsApp-Style Chat Rooms
+# ===========================================================================
+
+@app.websocket("/ws/chat/{room_id}")
+async def websocket_chat_endpoint(
+    websocket: WebSocket,
+    room_id: str,
+    sender_name: str = Query("User", description="Display name of the participant"),
+):
+    """WebSocket endpoint supporting real-time chat partitioned into rooms.
+
+    Simulates WhatsApp conversations with participants.
+    """
+    await chat_manager.connect(websocket, room_id, sender_name)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Support both raw text or JSON payloads with sender_name & text
+            try:
+                parsed = json.loads(data)
+                text = parsed.get("text", "")
+                msg_sender = parsed.get("sender_name", sender_name)
+            except Exception:
+                text = data
+                msg_sender = sender_name
+
+            if text.strip():
+                msg = chat_manager.format_message(
+                    room_id=room_id,
+                    sender_name=msg_sender,
+                    text=text.strip(),
+                    msg_type="message",
+                )
+                await chat_manager.broadcast(room_id, msg)
+    except WebSocketDisconnect:
+        await chat_manager.disconnect(websocket, room_id)
+
+
+@app.get("/chat/rooms", tags=["Chat"])
+def list_chat_rooms():
+    """List currently active chat rooms, participant count, and message count."""
+    return chat_manager.get_active_rooms()
+
+
+@app.get("/chat/rooms/{room_id}/messages", tags=["Chat"])
+def get_room_messages(room_id: str):
+    """Retrieve recent message history for a given chat room."""
+    return chat_manager.get_history(room_id)
+
+
+@app.post("/chat/rooms/{room_id}/messages", status_code=status.HTTP_201_CREATED, tags=["Chat"])
+async def post_room_message(room_id: str, payload: schemas.ChatMessagePayload):
+    """Inject a message into a chat room via REST (e.g. from an automated bot,
+
+    debt prevention alert, or payment reminder) and broadcast to connected WebSockets.
+    """
+    msg = chat_manager.format_message(
+        room_id=room_id,
+        sender_name=payload.sender_name,
+        text=payload.text,
+        msg_type="message",
+    )
+    await chat_manager.broadcast(room_id, msg)
+    return msg
+
+
+@app.get("/chat/{room_id}", response_class=HTMLResponse, tags=["Chat"])
+def chat_room_page(room_id: str):
+    """Renders a WhatsApp-styled web interface to simulate chatting with individuals."""
+    html_path = os.path.join(os.path.dirname(__file__), "chat_ui.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content.replace("{{ room_id }}", room_id))
