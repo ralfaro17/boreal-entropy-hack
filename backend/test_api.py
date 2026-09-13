@@ -736,6 +736,54 @@ def test_guardrails_rejection_and_distress_escalation():
     print("✓ Guardrails operator rejection, distress escalation, off-topic defense, and compliance audit events passed")
 
 
+def test_voice_interrupt():
+    # 1. Create a test customer
+    unique_email = f"voice_int_{uuid.uuid4().hex[:8]}@example.com"
+    payload = {
+        "full_name": "Carlos Interruption",
+        "email": unique_email,
+        "age": 35,
+        "region": "Central",
+        "employment_status": "employed",
+        "income_bracket": "50k-75k",
+        "tenure_months": 12,
+        "credit_score": 680,
+    }
+    res = client.post("/customers", json=payload)
+    assert res.status_code == 201
+    cust_id = res.json()["id"]
+
+    # 2. Call greeting to generate an initial assistant message in the conversation
+    greet_res = client.get(f"/voice/greeting/{cust_id}")
+    assert greet_res.status_code == 200
+
+    # 3. Post interruption
+    int_res = client.post("/voice/interrupt", json={"customer_id": cust_id})
+    assert int_res.status_code == 200
+    assert int_res.json()["status"] == "interrupted"
+
+    # 4. Verify message content updated with [interrumpido]
+    conv_res = client.get("/conversations", params={"customer_id": cust_id})
+    assert conv_res.status_code == 200
+    conv_id = conv_res.json()[0]["id"]
+    msgs_res = client.get(f"/conversations/{conv_id}/messages")
+    assert msgs_res.status_code == 200
+    msgs = msgs_res.json()
+    assert len(msgs) >= 1
+    last_asst_msg = next(m for m in reversed(msgs) if m["role"] == "assistant")
+    assert "[interrumpido]" in last_asst_msg["content"]
+
+    # 5. Calling again is idempotent (returns noop, doesn't duplicate tag)
+    int_res_2 = client.post("/voice/interrupt", json={"customer_id": cust_id})
+    assert int_res_2.status_code == 200
+    assert int_res_2.json()["status"] == "noop"
+
+    # 6. 404 for non-existent customer
+    bad_res = client.post("/voice/interrupt", json={"customer_id": str(uuid.uuid4())})
+    assert bad_res.status_code == 404
+
+    print("✓ Voice interruption endpoint passed")
+
 
 if __name__ == "__main__":
     test_system_endpoints()
@@ -748,6 +796,7 @@ if __name__ == "__main__":
     test_websocket_chat_rooms()
     test_risk_reminders_and_customer_websocket()
     test_guardrails_rejection_and_distress_escalation()
+    test_voice_interrupt()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
 
 

@@ -40,7 +40,9 @@
     "monitorOn": "Escuchando el audio del cliente",
     "monitorOff": "Audio del cliente silenciado localmente (clic para escuchar)",
     "monitorOnHint": "El audio del cliente se reproduce en este dispositivo.",
-    "monitorOffHint": "Audio del cliente silenciado localmente para evitar eco al hacer demos en una sola máquina."
+    "monitorOffHint": "Audio del cliente silenciado localmente para evitar eco al hacer demos en una sola máquina.",
+    "interruptedBadge": "Interrumpido",
+    "interruptButton": "Interrumpir a la IA"
   },
   "portalCall": {
     "subtitle": "Línea de voz segura",

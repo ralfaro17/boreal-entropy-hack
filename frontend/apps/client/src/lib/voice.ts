@@ -78,12 +78,18 @@ export const TTS_VOICES: Record<string, string> = {
   en: 'aura-2-asteria-en',
 };
 
+export interface PlayTtsOptions {
+  localMonitor?: boolean;
+  language?: string;
+  signal?: AbortSignal;
+}
+
 export interface CallAudioGraph {
   /** Stream to hand to peer.call(): mic + TTS mixed together. */
   outgoingStream: MediaStream;
   /** Play AI TTS audio into the call (both parties hear it). */
-  playTts: (text: string, opts?: { localMonitor?: boolean; language?: string }) => Promise<void>;
-  /** Stop any TTS currently playing. */
+  playTts: (text: string, opts?: PlayTtsOptions) => Promise<void>;
+  /** Stop any TTS currently playing or pending. */
   stopTts: () => void;
   close: () => void;
 }
@@ -104,39 +110,145 @@ export function createCallAudioGraph(micStream: MediaStream): CallAudioGraph {
   micGain.connect(dest);
 
   let currentTts: AudioBufferSourceNode | null = null;
+  let playbackSeq = 0;
 
-  const playTts = async (text: string, opts?: { localMonitor?: boolean; language?: string }) => {
+  const stopTts = () => {
+    playbackSeq++; // Invalidate any pending in-flight fetch / decode
+    if (currentTts) {
+      try {
+        currentTts.stop();
+        currentTts.disconnect();
+      } catch {
+        // already stopped or disconnected
+      }
+      currentTts = null;
+    }
+  };
+
+  const playTts = async (text: string, opts?: PlayTtsOptions) => {
+    const seq = ++playbackSeq;
     const model = TTS_VOICES[opts?.language ?? 'es'] ?? TTS_VOICES.es;
+
+    if (opts?.signal?.aborted) return;
+
     const res = await fetch('/voice/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, encoding: 'mp3', model }),
+      signal: opts?.signal,
     });
     if (!res.ok) {
       // 501 => no API key configured; caller may fall back to Web Speech API.
       throw new Error(`TTS failed: ${res.status}`);
     }
+
+    if (playbackSeq !== seq || opts?.signal?.aborted) return;
+
     const buf = await res.arrayBuffer();
+    if (playbackSeq !== seq || opts?.signal?.aborted) return;
+
     const audioBuf = await ctx.decodeAudioData(buf);
-    currentTts?.stop();
+    if (playbackSeq !== seq || opts?.signal?.aborted) return;
+
+    if (currentTts) {
+      try {
+        currentTts.stop();
+      } catch {
+        // ignore
+      }
+      currentTts = null;
+    }
+
     const src = ctx.createBufferSource();
     src.buffer = audioBuf;
     src.connect(dest); // into the call
     if (opts?.localMonitor !== false) src.connect(ctx.destination); // local speakers
     currentTts = src;
+
     await ctx.resume();
     src.start();
+
     await new Promise<void>((resolve) => {
-      src.onended = () => resolve();
+      const handleEnded = () => {
+        if (currentTts === src) {
+          currentTts = null;
+        }
+        resolve();
+      };
+      src.onended = handleEnded;
+      opts?.signal?.addEventListener(
+        'abort',
+        () => {
+          try {
+            src.stop();
+          } catch {
+            // ignore
+          }
+          handleEnded();
+        },
+        { once: true },
+      );
     });
   };
 
   return {
     outgoingStream: dest.stream,
     playTts,
-    stopTts: () => currentTts?.stop(),
-    close: () => void ctx.close(),
+    stopTts,
+    close: () => {
+      stopTts();
+      void ctx.close();
+    },
   };
+}
+
+/**
+ * Detect whether incoming transcribed speech is likely acoustic echo of the AI's
+ * current utterance (e.g. from laptop speakers bleeding into mic) rather than
+ * genuine customer interruption.
+ */
+export function isEchoOfAi(spokenText: string, aiText: string): boolean {
+  if (!aiText || !spokenText) return false;
+  const clean = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'¡¿]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const cleanSpoken = clean(spokenText);
+  const cleanAi = clean(aiText);
+  if (!cleanSpoken) return false;
+
+  const spokenWords = cleanSpoken.split(' ').filter(Boolean);
+  if (spokenWords.length === 0) return false;
+
+  // Common single-word barge-in keywords should NEVER be treated as echo
+  const interruptKeywords = new Set([
+    'no', 'espera', 'wait', 'stop', 'alto', 'oye', 'pero', 'momento', 'calla', 'parar', 'hold', 'pause'
+  ]);
+  if (spokenWords.length === 1 && interruptKeywords.has(spokenWords[0])) {
+    return false;
+  }
+
+  // Word-boundary check: exact phrase match in AI text
+  const paddedAi = ` ${cleanAi} `;
+  const paddedSpoken = ` ${cleanSpoken} `;
+  if (paddedAi.includes(paddedSpoken)) {
+    return true;
+  }
+
+  // Word overlap check for partial acoustic bleeding
+  const longSpokenWords = spokenWords.filter((w) => w.length > 2);
+  if (longSpokenWords.length >= 2) {
+    const aiWords = new Set(cleanAi.split(' ').filter((w) => w.length > 2));
+    const matchCount = longSpokenWords.filter((w) => aiWords.has(w)).length;
+    if (matchCount / longSpokenWords.length >= 0.75) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Browser-native fallback when the backend TTS is not configured. */

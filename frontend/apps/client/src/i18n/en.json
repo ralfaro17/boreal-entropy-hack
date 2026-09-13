@@ -40,7 +40,9 @@
     "monitorOn": "Listening to the customer's audio",
     "monitorOff": "Customer audio muted locally (click to listen in)",
     "monitorOnHint": "Customer audio is playing on this device.",
-    "monitorOffHint": "Customer audio muted locally to prevent echo when demoing on one machine."
+    "monitorOffHint": "Customer audio muted locally to prevent echo when demoing on one machine.",
+    "interruptedBadge": "Interrupted",
+    "interruptButton": "Interrupt AI (Barge-in)"
   },
   "portalCall": {
     "subtitle": "Secure voice line",

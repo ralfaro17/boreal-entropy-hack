@@ -19,6 +19,7 @@ import {
   agentPeerId,
   createCallAudioGraph,
   customerPeerId,
+  isEchoOfAi,
   openVoiceSocket,
   startPcmCapture,
   type CallAudioGraph,
@@ -39,6 +40,7 @@ import {
   User,
   Captions,
   ExternalLink,
+  Square,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 
@@ -49,6 +51,7 @@ interface TurnLine {
   who: 'customer' | 'ai';
   text: string;
   final: boolean;
+  interrupted?: boolean;
 }
 
 const EMOTION_COLORS: Record<EmotionEvent['label'], string> = {
@@ -91,8 +94,52 @@ export function AICall() {
   const socketRef = useRef<WebSocket | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
-  const busyRef = useRef(false); // half-duplex: true while AI is thinking/speaking
+  const busyRef = useRef(false); // true while AI is thinking/speaking
   const stoppedRef = useRef(false);
+  const aiSpeakingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const currentAiTextRef = useRef<string>('');
+  const lastAiTurnIdRef = useRef<number | null>(null);
+
+  const setAiSpeakingState = useCallback((speaking: boolean) => {
+    aiSpeakingRef.current = speaking;
+    setAiSpeaking(speaking);
+  }, []);
+
+  const interruptAi = useCallback((reason = 'customer_barge_in') => {
+    // 1. Cancel in-flight network requests (agent-reply or TTS fetch)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // 2. Stop active Web Audio playback instantly
+    graphRef.current?.stopTts();
+
+    // 3. Reset speaking state and locks
+    aiSpeakingRef.current = false;
+    setAiSpeaking(false);
+    busyRef.current = false;
+    currentAiTextRef.current = '';
+
+    // 4. Mark the most recent AI turn as interrupted in UI
+    if (lastAiTurnIdRef.current != null) {
+      const turnId = lastAiTurnIdRef.current;
+      setTurns((prev) =>
+        prev.map((turn) => (turn.id === turnId ? { ...turn, interrupted: true } : turn))
+      );
+    }
+
+    // 5. Notify backend to update message history with [interrumpido]
+    const custId = customerId;
+    if (custId) {
+      void fetch('/voice/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: custId, reason }),
+      }).catch(() => undefined);
+    }
+  }, [customerId]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,6 +147,11 @@ export function AICall() {
 
   const cleanup = useCallback((finalStatus: AgentStatus = 'ended') => {
     stoppedRef.current = true;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    graphRef.current?.stopTts();
     captureRef.current?.stop();
     captureRef.current = null;
     socketRef.current?.close();
@@ -113,7 +165,11 @@ export function AICall() {
     peerRef.current?.destroy();
     peerRef.current = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    aiSpeakingRef.current = false;
     setAiSpeaking(false);
+    busyRef.current = false;
+    currentAiTextRef.current = '';
+    lastAiTurnIdRef.current = null;
     setStatus((prev) => (prev === 'idle' ? 'idle' : finalStatus));
   }, []);
 
@@ -126,48 +182,84 @@ export function AICall() {
       if (last && !last.final && last.who === who) {
         next[next.length - 1] = { ...last, text, final };
       } else {
-        next.push({ id: ++turnSeq, who, text, final });
+        const id = ++turnSeq;
+        if (who === 'ai') {
+          lastAiTurnIdRef.current = id;
+        }
+        next.push({ id, who, text, final });
       }
       return next.slice(-80);
     });
   };
 
-  /** Speak text into the call via backend TTS; disable listening while talking.
+  /** Speak text into the call via backend TTS; interruptible via signal.
    * localMonitor=false: the AI voice reaches the agent through the portal side;
    * playing it locally too causes an echo/double-audio effect. */
   const speak = useCallback(async (text: string, language = 'es') => {
-    if (!graphRef.current) return;
-    setAiSpeaking(true);
+    if (!graphRef.current || stoppedRef.current) return;
+    setAiSpeakingState(true);
+    currentAiTextRef.current = text;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      await graphRef.current.playTts(text, { language, localMonitor: false });
+      await graphRef.current.playTts(text, {
+        language,
+        localMonitor: false,
+        signal: controller.signal,
+      });
     } catch {
-      showErrorToast(t('aiCall.ttsError'));
+      if (!controller.signal.aborted) {
+        showErrorToast(t('aiCall.ttsError'));
+      }
     } finally {
-      setAiSpeaking(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      setAiSpeakingState(false);
+      currentAiTextRef.current = '';
     }
-  }, [t]);
+  }, [setAiSpeakingState, t]);
 
   /** One agent turn: customer's final transcript -> LLM reply -> TTS. */
   const handleCustomerUtterance = useCallback(async (text: string, custId: string) => {
-    if (busyRef.current || stoppedRef.current) return;
+    if (stoppedRef.current) return;
+
+    // Abort any prior in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     busyRef.current = true;
+
     try {
       const res = await fetch('/voice/agent-reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customer_id: custId, message: text }),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!res.ok) throw new Error(`agent-reply ${res.status}`);
       const data: { reply: string; escalated: boolean; language?: string } = await res.json();
+      if (controller.signal.aborted || stoppedRef.current) return;
+
       addTurn('ai', data.reply);
       await speak(data.reply, data.language ?? 'es');
+
       if (data.escalated) {
         setStatus('escalated');
         stoppedRef.current = true; // freeze the loop; human takes over
       }
     } catch {
-      showErrorToast(t('aiCall.replyError'));
+      if (!controller.signal.aborted) {
+        showErrorToast(t('aiCall.replyError'));
+      }
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       busyRef.current = false;
     }
   }, [speak, t]);
@@ -232,11 +324,24 @@ export function AICall() {
               return;
             }
             if (ev.type === 'partial' || ev.type === 'final') {
-              // Ignore the customer's echo of AI speech while the AI is talking
-              if (busyRef.current || stoppedRef.current) return;
-              addTurn('customer', ev.text, ev.type === 'final');
+              if (stoppedRef.current) return;
+              const text = ev.text.trim();
+              if (!text) return;
+
+              const isAiActive = aiSpeakingRef.current || busyRef.current || !!currentAiTextRef.current;
+              if (isAiActive) {
+                // Ignore acoustic feedback if customer mic merely re-captured the AI speaking
+                if (isEchoOfAi(text, currentAiTextRef.current)) {
+                  return;
+                }
+
+                // Genuine customer barge-in: cut off the AI immediately!
+                interruptAi('barge_in');
+              }
+
+              addTurn('customer', text, ev.type === 'final');
               if (ev.type === 'final') {
-                void handleCustomerUtterance(ev.text, custId);
+                void handleCustomerUtterance(text, custId);
               }
             }
           }, { persist: false });
@@ -254,8 +359,10 @@ export function AICall() {
             const res = await fetch(`/voice/greeting/${custId}`);
             if (res.ok) {
               const { greeting, language } = await res.json();
-              addTurn('ai', greeting);
-              await speak(greeting, language ?? 'es');
+              if (!stoppedRef.current) {
+                addTurn('ai', greeting);
+                await speak(greeting, language ?? 'es');
+              }
             }
           } catch {
             // greeting failure is non-fatal; agent will respond reactively
@@ -271,7 +378,7 @@ export function AICall() {
       cleanup('idle');
       setStatus('idle');
     }
-  }, [customerId, cleanup, handleCustomerUtterance, speak, t]);
+  }, [customerId, cleanup, handleCustomerUtterance, interruptAi, speak, t]);
 
   const hangUp = () => cleanup('ended');
 
@@ -296,6 +403,19 @@ export function AICall() {
   const portalPath = customerId ? `/portal/call/${customerId}` : '';
   const emotionColor = EMOTION_COLORS[emotion?.label ?? 'silent'];
   const inSession = status === 'dialing' || status === 'in-call' || status === 'escalated';
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Presenter shortcut: press Escape to interrupt AI speech immediately
+      if (e.key === 'Escape') {
+        if (inSession && (aiSpeakingRef.current || busyRef.current)) {
+          interruptAi('keyboard_escape');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [inSession, interruptAi]);
 
   return (
     <div className="space-y-6">
@@ -401,6 +521,19 @@ export function AICall() {
               </div>
             )}
             {inSession && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-medium"
+                onClick={() => interruptAi('manual_button')}
+                disabled={!aiSpeaking && !busyRef.current}
+                title="Barge in and interrupt the AI (Escape)"
+              >
+                <Square className="mr-2 h-3.5 w-3.5 fill-current" />
+                {t('aiCall.interruptButton', 'Interrupt AI (Barge-in)')}
+              </Button>
+            )}
+            {inSession && (
               <p className="text-[10px] text-muted-foreground leading-snug">
                 {agentMicOn ? t('aiCall.micOnHint') : t('aiCall.micOffHint')}{' '}
                 {monitorOn ? t('aiCall.monitorOnHint') : t('aiCall.monitorOffHint')}
@@ -459,12 +592,20 @@ export function AICall() {
                 <CardTitle className="text-base">{t('aiCall.liveConversation')}</CardTitle>
                 <CardDescription className="text-xs">{t('aiCall.liveConversationHint')}</CardDescription>
               </div>
-              {aiSpeaking && (
+              {aiSpeaking ? (
                 <Badge variant="secondary" className="ml-auto gap-1.5">
                   <Bot className="h-3 w-3 animate-pulse" />
                   {t('aiCall.speakingBadge')}
                 </Badge>
-              )}
+              ) : status === 'in-call' ? (
+                <Badge
+                  variant="outline"
+                  className="ml-auto gap-1.5 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                >
+                  <Radio className="h-3 w-3 animate-pulse" />
+                  {t('aiCall.statusListening', 'Listening')}
+                </Badge>
+              ) : null}
             </div>
           </CardHeader>
           <CardContent className="p-4">
@@ -485,6 +626,15 @@ export function AICall() {
                         <>
                           <Bot className="h-3.5 w-3.5 text-primary" />
                           <span className="text-xs font-medium text-primary">Payment Assistant</span>
+                          {turn.interrupted && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] h-4.5 px-1.5 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 gap-1 animate-in fade-in duration-200"
+                            >
+                              <Square className="h-2 w-2 fill-current" />
+                              {t('aiCall.interruptedBadge', 'Interrupted')}
+                            </Badge>
+                          )}
                         </>
                       ) : (
                         <>

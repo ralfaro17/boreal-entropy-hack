@@ -1758,6 +1758,39 @@ async def voice_agent_reply(payload: AgentReplyPayload, db: Session = Depends(ge
     return {"reply": reply, "escalated": escalated, "language": lang, "conversation_id": convo.id}
 
 
+class VoiceInterruptPayload(PydanticBaseModel):
+    customer_id: str
+    reason: str = "customer_barge_in"
+
+
+@app.post("/voice/interrupt", tags=["Voice"])
+def voice_interrupt(payload: VoiceInterruptPayload, db: Session = Depends(get_db)):
+    """Handle customer interruption of the AI voice agent.
+    Updates the most recent assistant message in the active conversation
+    to reflect that it was interrupted mid-speech, keeping LLM context accurate."""
+    customer = db.get(models.Customer, payload.customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    convo = get_or_create_active_conversation(db, customer.id)
+    last_assistant_msg = (
+        db.query(models.Message)
+        .filter(
+            models.Message.conversation_id == convo.id,
+            models.Message.role == models.MessageRole.ASSISTANT,
+        )
+        .order_by(models.Message.created_at.desc())
+        .first()
+    )
+    if last_assistant_msg and "[interrumpido]" not in last_assistant_msg.content.lower():
+        last_assistant_msg.content = f"{last_assistant_msg.content} [interrumpido]"[:2000]
+        convo.last_message_at = datetime.utcnow()
+        db.commit()
+        return {"status": "interrupted", "message_id": last_assistant_msg.id}
+
+    return {"status": "noop"}
+
+
 @app.get("/voice/greeting/{customer_id}", tags=["Voice"])
 async def voice_agent_greeting(customer_id: str, db: Session = Depends(get_db)):
     """Opening line for an AI-initiated call: a compliant payment reminder for the
