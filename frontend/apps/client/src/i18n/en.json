@@ -137,7 +137,9 @@
     "sending": "Sending...",
     "reminderSentSuccess": "Risk reminder sent and broadcast successfully",
     "reminderSentError": "Failed to send risk reminder",
-    "noCandidates": "No at-risk customers with pending installments found"
+    "noCandidates": "No at-risk customers with pending installments found",
+    "openCustomerChat": "Customer Chat",
+    "respondAsCustomer": "Respond as Customer"
   },
   "employment": {
     "employed": "Employed",

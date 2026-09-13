@@ -137,7 +137,9 @@
     "sending": "Enviando...",
     "reminderSentSuccess": "Recordatorio de riesgo enviado y transmitido con éxito",
     "reminderSentError": "Error al enviar el recordatorio de riesgo",
-    "noCandidates": "No se encontraron clientes en riesgo con cuotas pendientes"
+    "noCandidates": "No se encontraron clientes en riesgo con cuotas pendientes",
+    "openCustomerChat": "Portal Cliente",
+    "respondAsCustomer": "Responder como Cliente"
   },
   "employment": {
     "employed": "Empleado",

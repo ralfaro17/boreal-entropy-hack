@@ -260,16 +260,30 @@ export function Chat() {
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatDate(convo.last_message_at)}
                     </TableCell>
-                    <TableCell className="text-right pr-6">
+                    <TableCell className="text-right pr-6 space-x-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
+                          window.open(`/chat/${convo.customer_id}`, '_blank');
+                        }}
+                        title={t('chat.openCustomerChat')}
+                        className="text-xs text-primary border-primary/30 hover:bg-primary/10"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                        {t('chat.openCustomerChat')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedConversation(convo);
                         }}
+                        className="text-xs"
                       >
-                        <Eye className="h-4 w-4 mr-1" />
+                        <Eye className="h-3.5 w-3.5 mr-1" />
                         {t('chat.viewConversation')}
                       </Button>
                     </TableCell>
@@ -522,27 +536,42 @@ export function Chat() {
             )}
           </div>
 
-          <div className="border-t pt-3 flex items-center justify-between">
-            {selectedConversation?.customer_id ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const customerId = selectedConversation.customer_id;
-                  setSelectedConversation(null);
-                  navigate(`/customers/${customerId}`);
-                }}
-              >
-                <ExternalLink className="h-4 w-4 mr-1.5" />
-                View Customer Profile
-              </Button>
-            ) : (
-              <div />
-            )}
+          <div className="border-t pt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {selectedConversation?.customer_id && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      window.open(`/chat/${selectedConversation.customer_id}`, '_blank');
+                    }}
+                    className="gap-1.5 text-primary border-primary/30 hover:bg-primary/10 text-xs"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    {t('chat.respondAsCustomer')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const customerId = selectedConversation.customer_id;
+                      setSelectedConversation(null);
+                      navigate(`/customers/${customerId}`);
+                    }}
+                    className="text-xs"
+                  >
+                    <User className="h-3.5 w-3.5 mr-1" />
+                    Profile
+                  </Button>
+                </>
+              )}
+            </div>
             <Button
               variant="secondary"
               size="sm"
               onClick={() => setSelectedConversation(null)}
+              className="text-xs ml-auto"
             >
               Close
             </Button>
