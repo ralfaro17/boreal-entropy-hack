@@ -46,11 +46,51 @@ Interactive API documentation will be available at:
 
 ## API Endpoints
 
-- `GET /`: Welcome message
+Interactive documentation with try-it-out capabilities is available at `/docs`.
+
+### System
+- `GET /`: Welcome message and version info
 - `GET /health`: Database connectivity check
-- `GET /users`: Paginated list of users
-- `POST /users`: Create a new user
-- `GET /users/{user_id}`: Retrieve a user by ID
+
+### Customers (`/customers`)
+- `POST /customers`: Create a new customer
+- `GET /customers`: List customers (supports pagination `skip`, `limit` and filters: `email`, `region`, `employment_status`)
+- `GET /customers/{customer_id}`: Retrieve customer details
+- `PUT` / `PATCH /customers/{customer_id}`: Update customer profile
+- `DELETE /customers/{customer_id}`: Delete customer (cascades to accounts, activities, risk features)
+
+### Accounts (`/accounts`)
+- `POST /accounts`: Create a loan or credit account for a customer
+- `GET /accounts`: List accounts (filters: `customer_id`, `product_type`, `is_active`)
+- `GET /customers/{customer_id}/accounts`: List accounts for a specific customer
+- `GET /accounts/{account_id}`: Retrieve account details
+- `PUT` / `PATCH /accounts/{account_id}`: Update account information
+- `DELETE /accounts/{account_id}`: Delete account (cascades to payments)
+
+### Payments (`/payments`)
+- `POST /payments`: Record a scheduled or completed payment
+- `GET /payments`: List payments (filters: `account_id`, `status`)
+- `GET /accounts/{account_id}/payments`: List payment schedule & history for an account
+- `GET /payments/{payment_id}`: Retrieve payment details
+- `PUT` / `PATCH /payments/{payment_id}`: Update payment record
+- `DELETE /payments/{payment_id}`: Delete payment record
+
+### Account Activity (`/account-activity`)
+- `POST /account-activity`: Record account activity snapshot (balances, app logins, hardship)
+- `GET /account-activity`: List activity snapshots (filters: `customer_id`, `hardship_flag`, `large_withdrawal_flag`)
+- `GET /customers/{customer_id}/account-activity`: List activity snapshots for a customer
+- `GET /account-activity/{activity_id}`: Retrieve activity snapshot details
+- `PUT` / `PATCH /account-activity/{activity_id}`: Update activity snapshot
+- `DELETE /account-activity/{activity_id}`: Delete activity snapshot
+
+### Risk Features (`/risk-features`)
+- `POST /risk-features`: Record calculated risk features
+- `GET /risk-features`: List risk features (filters: `customer_id`, `early_warning_flag`, `defaulted`)
+- `GET /customers/{customer_id}/risk-features`: List risk features for a customer
+- `GET /risk-features/{feature_id}`: Retrieve risk feature details
+- `PUT` / `PATCH /risk-features/{feature_id}`: Update risk feature record
+- `DELETE /risk-features/{feature_id}`: Delete risk feature record
+- `GET /customers/{customer_id}/early-warning`: Real-time early-warning risk indicator for prevention
 
 ## Working with Models
 

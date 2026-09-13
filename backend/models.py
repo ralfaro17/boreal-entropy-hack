@@ -21,11 +21,9 @@ from sqlalchemy import (
     Numeric,
     String,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-
-class Base(DeclarativeBase):
-    pass
+from database import Base
 
 
 def gen_uuid() -> str:
@@ -96,9 +94,15 @@ class Customer(Base):
     credit_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    accounts: Mapped[list["Account"]] = relationship(back_populates="customer")
-    activities: Mapped[list["AccountActivity"]] = relationship(back_populates="customer")
-    risk_features: Mapped[list["RiskFeature"]] = relationship(back_populates="customer")
+    accounts: Mapped[list["Account"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
+    activities: Mapped[list["AccountActivity"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
+    risk_features: Mapped[list["RiskFeature"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +122,9 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="accounts")
-    payments: Mapped[list["Payment"]] = relationship(back_populates="account")
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
 
 
 # ---------------------------------------------------------------------------
