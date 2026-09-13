@@ -122,7 +122,22 @@
     "lastMessage": "Último mensaje",
     "lastActive": "Última actividad",
     "escalated": "Escalado",
-    "normal": "Estándar"
+    "normal": "Estándar",
+    "sendRiskReminder": "Enviar recordatorio de riesgo",
+    "riskReminderDialogTitle": "Enviar recordatorio inteligente de riesgo",
+    "riskReminderDialogDesc": "Selecciona un cliente que supera los umbrales de riesgo para generar y enviar un recordatorio empático de pago con IA.",
+    "selectCustomer": "Seleccionar cliente en riesgo",
+    "riskMetrics": "Señales de riesgo",
+    "nextInstallment": "Cuota pendiente",
+    "dueDate": "Vencimiento",
+    "streak": "Racha de impagos",
+    "hardship": "Dificultad registrada",
+    "customMessagePlaceholder": "Opcional: Texto personalizado (deja vacío para que la IA genere el recordatorio conforme a las normas)...",
+    "sendAction": "Enviar recordatorio con IA",
+    "sending": "Enviando...",
+    "reminderSentSuccess": "Recordatorio de riesgo enviado y transmitido con éxito",
+    "reminderSentError": "Error al enviar el recordatorio de riesgo",
+    "noCandidates": "No se encontraron clientes en riesgo con cuotas pendientes"
   },
   "employment": {
     "employed": "Empleado",

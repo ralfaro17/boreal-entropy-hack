@@ -122,7 +122,22 @@
     "lastMessage": "Last Message",
     "lastActive": "Last Active",
     "escalated": "Escalated",
-    "normal": "Standard"
+    "normal": "Standard",
+    "sendRiskReminder": "Send Risk Reminder",
+    "riskReminderDialogTitle": "Send AI Risk Reminder",
+    "riskReminderDialogDesc": "Select a customer exceeding risk thresholds to generate and send a compliant debt-prevention reminder.",
+    "selectCustomer": "Select At-Risk Customer",
+    "riskMetrics": "Risk Signals",
+    "nextInstallment": "Pending Installment",
+    "dueDate": "Due Date",
+    "streak": "Missed Streak",
+    "hardship": "Hardship on file",
+    "customMessagePlaceholder": "Optional: Custom message text (leave empty to let AI generate compliant reminder)...",
+    "sendAction": "Send AI Reminder",
+    "sending": "Sending...",
+    "reminderSentSuccess": "Risk reminder sent and broadcast successfully",
+    "reminderSentError": "Failed to send risk reminder",
+    "noCandidates": "No at-risk customers with pending installments found"
   },
   "employment": {
     "employed": "Employed",

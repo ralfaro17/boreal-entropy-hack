@@ -219,3 +219,9 @@ class RiskFeatureOut(RiskFeatureBase):
 class ChatMessagePayload(BaseModel):
     sender_name: str = "Bank Bot"
     text: str
+
+
+class SendRiskReminderPayload(BaseModel):
+    customer_id: str
+    language: str = "es"
+    custom_message: str | None = None

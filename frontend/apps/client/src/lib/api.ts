@@ -155,6 +155,18 @@ export const conversationsApi = {
     request<ConversationMessage[]>(`/conversations/${conversationId}/messages`),
 };
 
+// Risk Reminders
+export const riskRemindersApi = {
+  getCandidates: () =>
+    request<RiskReminderCandidate[]>('/risk-reminders/candidates'),
+
+  sendReminder: (data: SendRiskReminderPayload) =>
+    request<SendRiskReminderResponse>('/risk-reminders/send', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
 // Types
 export type EmploymentStatus = 'employed' | 'self_employed' | 'unemployed' | 'retired' | 'student';
 export type ProductType = 'mortgage' | 'personal_loan' | 'credit_card' | 'auto_loan';
@@ -402,3 +414,40 @@ export interface ConversationMessage {
   created_at: string | null;
   flagged: boolean;
 }
+
+export interface RiskReminderCandidate {
+  customer_id: string;
+  customer_name: string;
+  customer_email: string;
+  early_warning_flag: boolean;
+  missed_payment_streak: number;
+  consecutive_partial_payments: number;
+  balance_trend_30d: number | null;
+  hardship_flag: boolean;
+  payment_id: string;
+  amount_due: number;
+  due_date: string;
+  days_until_due: number;
+  is_overdue: boolean;
+  last_reminder_at: string | null;
+}
+
+export interface SendRiskReminderPayload {
+  customer_id: string;
+  language?: string;
+  custom_message?: string;
+}
+
+export interface SendRiskReminderResponse {
+  success: boolean;
+  conversation_id: string;
+  customer_id: string;
+  message: {
+    id: string;
+    role: string;
+    content: string;
+    created_at: string | null;
+    flagged: boolean;
+  };
+}
+

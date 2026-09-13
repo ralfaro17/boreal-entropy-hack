@@ -555,6 +555,60 @@ def test_websocket_chat_rooms():
     print("✓ WebSocket chat rooms and multi-room simulation passed")
 
 
+def test_risk_reminders_and_customer_websocket():
+    import json
+
+    # 1. Test candidates endpoint
+    res = client.get("/risk-reminders/candidates")
+    assert res.status_code == 200
+    candidates = res.json()
+    assert len(candidates) > 0
+    candidate = candidates[0]
+    assert "customer_id" in candidate
+    assert "amount_due" in candidate
+    assert "due_date" in candidate
+
+    # 2. Test send reminder endpoint
+    send_res = client.post(
+        "/risk-reminders/send",
+        json={
+            "customer_id": candidate["customer_id"],
+            "language": "es",
+        },
+    )
+    assert send_res.status_code == 201
+    send_data = send_res.json()
+    assert send_data["success"] is True
+    assert "conversation_id" in send_data
+    assert "message" in send_data
+    assert len(send_data["message"]["content"]) > 0
+
+    # 3. Test customer websocket room persistence
+    cust_id = candidate["customer_id"]
+    with client.websocket_connect(f"/ws/chat/{cust_id}?sender_name=Customer") as ws:
+        hist_event = ws.receive_json()
+        assert hist_event["type"] == "history"
+        assert len(hist_event["messages"]) >= 1
+
+        join_msg = ws.receive_json()
+        assert join_msg["type"] == "system"
+
+        # Send customer message over WebSocket
+        test_text = "Recibido, gracias por el aviso."
+        ws.send_text(json.dumps({"text": test_text, "sender_name": "Customer"}))
+        echo_msg = ws.receive_json()
+        assert echo_msg["text"] == test_text
+
+    # 4. Verify message was persisted into DB conversation
+    conv_res = client.get("/conversations", params={"customer_id": cust_id})
+    assert conv_res.status_code == 200
+    customer_convos = conv_res.json()
+    assert len(customer_convos) >= 1
+    assert customer_convos[0]["last_message"] == test_text
+
+    print("✓ Risk reminders and customer WebSocket persistence passed")
+
+
 if __name__ == "__main__":
     test_system_endpoints()
     test_customer_crud()
@@ -564,5 +618,7 @@ if __name__ == "__main__":
     test_risk_feature_crud_and_early_warning()
     test_cascade_delete()
     test_websocket_chat_rooms()
+    test_risk_reminders_and_customer_websocket()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
+
 

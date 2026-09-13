@@ -33,11 +33,20 @@ class ConnectionManager:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def connect(self, websocket: WebSocket, room_id: str, sender_name: str):
+    async def connect(
+        self,
+        websocket: WebSocket,
+        room_id: str,
+        sender_name: str,
+        initial_history: list[dict[str, Any]] | None = None,
+    ):
         await websocket.accept()
         if room_id not in self.active_connections:
             self.active_connections[room_id] = {}
         self.active_connections[room_id][websocket] = sender_name
+
+        if room_id not in self.history and initial_history:
+            self.history[room_id] = list(initial_history)
 
         # Send existing message history to the newly connected participant
         history_msgs = self.get_history(room_id)

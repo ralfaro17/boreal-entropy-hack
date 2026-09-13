@@ -6,6 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -20,9 +28,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/page-header';
-import { useConversations, useConversationMessages } from '@/hooks/useConversations';
+import {
+  useConversations,
+  useConversationMessages,
+  useRiskReminderCandidates,
+  useSendRiskReminder,
+} from '@/hooks/useConversations';
+import { showSuccessToast, showErrorToast } from '@/lib/toast-utils';
 import type { Conversation } from '@/lib/api';
 import {
   MessageSquare,
@@ -32,17 +47,34 @@ import {
   ExternalLink,
   Bot,
   User,
+  ShieldAlert,
+  Send,
+  Sparkles,
+  CreditCard,
+  Calendar,
+  Clock,
 } from 'lucide-react';
+
 export function Chat() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+
+  // Risk Reminder Dialog state
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [selectedCandidateId, setSelectedCandidateId] = useState('');
+  const [customMessage, setCustomMessage] = useState('');
 
   const { data: conversations, isLoading } = useConversations();
   const { data: messages, isLoading: loadingMessages } = useConversationMessages(
     selectedConversation?.id ?? null
   );
+
+  const { data: candidates, isLoading: loadingCandidates } = useRiskReminderCandidates();
+  const sendReminder = useSendRiskReminder();
+
+  const selectedCandidate = candidates?.find((c) => c.customer_id === selectedCandidateId);
 
   const filteredConversations = conversations?.filter(
     (c) =>
@@ -67,11 +99,48 @@ export function Chat() {
     }
   };
 
+  const handleOpenReminder = () => {
+    if (candidates && candidates.length > 0 && !selectedCandidateId) {
+      setSelectedCandidateId(candidates[0].customer_id);
+    }
+    setReminderOpen(true);
+  };
+
+  const handleSendReminder = async () => {
+    if (!selectedCandidateId) return;
+    try {
+      const result = await sendReminder.mutateAsync({
+        customer_id: selectedCandidateId,
+        language: i18n.language.startsWith('es') ? 'es' : 'en',
+        custom_message: customMessage.trim() || undefined,
+      });
+      showSuccessToast(t('chat.reminderSentSuccess'));
+      setReminderOpen(false);
+      setCustomMessage('');
+
+      // If conversation is available, highlight it
+      if (result.conversation_id && conversations) {
+        const matching = conversations.find((c) => c.id === result.conversation_id);
+        if (matching) {
+          setSelectedConversation(matching);
+        }
+      }
+    } catch (err: any) {
+      showErrorToast(err?.message || t('chat.reminderSentError'));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={t('chat.title')}
         description={t('chat.description')}
+        action={
+          <Button onClick={handleOpenReminder} className="gap-2">
+            <ShieldAlert className="h-4 w-4" />
+            {t('chat.sendRiskReminder')}
+          </Button>
+        }
       />
 
       <Card className="w-full overflow-hidden">
@@ -212,6 +281,159 @@ export function Chat() {
         </CardContent>
       </Card>
 
+      {/* Send Risk Reminder Dialog */}
+      <Dialog open={reminderOpen} onOpenChange={setReminderOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-destructive/10 text-destructive">
+                <ShieldAlert className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle>{t('chat.riskReminderDialogTitle')}</DialogTitle>
+                <DialogDescription className="text-xs mt-1">
+                  {t('chat.riskReminderDialogDesc')}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Candidate Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">
+                {t('chat.selectCustomer')}
+              </label>
+              {loadingCandidates ? (
+                <Skeleton className="h-10 w-full" />
+              ) : !candidates || candidates.length === 0 ? (
+                <p className="text-xs text-muted-foreground p-3 border rounded-md">
+                  {t('chat.noCandidates')}
+                </p>
+              ) : (
+                <Select
+                  value={selectedCandidateId}
+                  onValueChange={(val) => {
+                    if (val) setSelectedCandidateId(val);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={t('chat.selectCustomer')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {candidates.map((cand) => (
+                      <SelectItem key={cand.customer_id} value={cand.customer_id}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{cand.customer_name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            (${cand.amount_due.toFixed(2)})
+                          </span>
+                          {cand.is_overdue && (
+                            <Badge variant="destructive" className="text-[10px] py-0 px-1.5">
+                              Overdue
+                            </Badge>
+                          )}
+                          {cand.hardship_flag && (
+                            <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-destructive text-destructive">
+                              Hardship
+                            </Badge>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Selected Candidate Details Card */}
+            {selectedCandidate && (
+              <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between font-medium">
+                  <span>{selectedCandidate.customer_name}</span>
+                  <span className="text-muted-foreground">{selectedCandidate.customer_email}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <CreditCard className="h-3.5 w-3.5" />
+                    <span>{t('chat.nextInstallment')}:</span>
+                    <strong className="text-foreground font-semibold">
+                      ${selectedCandidate.amount_due.toFixed(2)}
+                    </strong>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Calendar className="h-3.5 w-3.5" />
+                    <span>{t('chat.dueDate')}:</span>
+                    <strong className={`font-semibold ${selectedCandidate.is_overdue ? 'text-destructive' : 'text-foreground'}`}>
+                      {selectedCandidate.due_date} ({selectedCandidate.days_until_due < 0 ? `${Math.abs(selectedCandidate.days_until_due)}d late` : `${selectedCandidate.days_until_due}d left`})
+                    </strong>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>{t('chat.streak')}:</span>
+                    <strong className="text-foreground font-semibold">
+                      {selectedCandidate.missed_payment_streak} missed
+                    </strong>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span>{t('chat.hardship')}:</span>
+                    <strong className={selectedCandidate.hardship_flag ? 'text-destructive font-semibold' : 'text-foreground'}>
+                      {selectedCandidate.hardship_flag ? 'Yes' : 'No'}
+                    </strong>
+                  </div>
+                </div>
+                {selectedCandidate.last_reminder_at && (
+                  <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+                    Last reminder: {formatDate(selectedCandidate.last_reminder_at)}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Custom Message Field */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>Message text</span>
+              </label>
+              <Textarea
+                placeholder={t('chat.customMessagePlaceholder')}
+                value={customMessage}
+                onChange={(e) => setCustomMessage(e.target.value)}
+                className="text-xs min-h-20"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Leave empty to automatically generate a compliant, non-judgmental debt-prevention reminder using AI.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setReminderOpen(false);
+                setCustomMessage('');
+              }}
+              disabled={sendReminder.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSendReminder}
+              disabled={!selectedCandidateId || sendReminder.isPending}
+              className="gap-1.5"
+            >
+              <Send className="h-3.5 w-3.5" />
+              {sendReminder.isPending ? t('chat.sending') : t('chat.sendAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Conversation Detail Modal */}
       <Dialog
         open={!!selectedConversation}
@@ -277,10 +499,10 @@ export function Chat() {
                       )}
                     </div>
                     <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
+                      className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
                         isUser
-                          ? 'bg-linear-to-br from-primary to-chart-2 text-primary-foreground rounded-tr-sm'
-                          : 'bg-muted text-foreground rounded-tl-sm border'
+                          ? 'bg-primary text-primary-foreground rounded-tr-none'
+                          : 'bg-muted text-foreground rounded-tl-none'
                       }`}
                     >
                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>

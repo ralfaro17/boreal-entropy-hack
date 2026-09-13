@@ -1,12 +1,15 @@
 import json
 import os
+import re
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import models
 import schemas
+from anthropic import AsyncAnthropic
 from chat import chat_manager
-from database import check_db_connection, get_db, init_db
+from database import SessionLocal, check_db_connection, get_db, init_db
 from fastapi import (
     Depends,
     FastAPI,
@@ -751,8 +754,227 @@ def early_warning_status(customer_id: str, db: Session = Depends(get_db)):
 
 
 # ===========================================================================
-# WebSocket & WhatsApp-Style Chat Rooms
+# WebSocket & WhatsApp-Style Chat Rooms (Backed by Persistent Conversation)
 # ===========================================================================
+
+ai_client = None
+if os.getenv("ANTHROPIC_API_KEY"):
+    try:
+        ai_client = AsyncAnthropic()
+    except Exception:
+        ai_client = None
+
+BANNED_OUTPUT_PATTERNS = [
+    r"\blegal action\b",
+    r"\bcredit (score|report) (will|may) (be )?(damage|hurt|suffer)",
+    r"\bcollections? agency\b",
+    r"\bwe (will|are going to) sue\b",
+    r"\bgarnish",
+    r"\bguarantee(d)? (a |the )?(discount|waiver|reduction)\b",
+    r"\bembargo\b",
+    r"\bdemanda\b",
+    r"\bagencia de cobranza\b",
+    r"\bdañar tu historial\b",
+]
+
+
+def output_violates_guardrails(text: str) -> str | None:
+    lowered = text.lower()
+    for pattern in BANNED_OUTPUT_PATTERNS:
+        if re.search(pattern, lowered):
+            return pattern
+    return None
+
+
+def get_or_create_active_conversation(db: Session, customer_id: str) -> models.Conversation:
+    """Retrieve an ongoing conversation from the last 14 days, or create a new one."""
+    cutoff = datetime.utcnow() - timedelta(days=14)
+    convo = (
+        db.query(models.Conversation)
+        .filter(models.Conversation.customer_id == customer_id)
+        .filter(models.Conversation.last_message_at >= cutoff)
+        .order_by(models.Conversation.last_message_at.desc())
+        .first()
+    )
+    if convo:
+        return convo
+
+    convo = models.Conversation(
+        customer_id=customer_id,
+        started_at=datetime.utcnow(),
+        last_message_at=datetime.utcnow(),
+        channel=models.Channel.APP,
+        is_escalated=False,
+    )
+    db.add(convo)
+    db.commit()
+    db.refresh(convo)
+    return convo
+
+
+async def generate_risk_reminder(
+    customer: models.Customer,
+    payment: models.Payment,
+    risk: models.RiskFeature | None,
+    activity: models.AccountActivity | None,
+    language: str = "es",
+) -> str:
+    """Generate a non-judgmental, compliant debt-prevention reminder."""
+    amount_due = float(payment.amount_due)
+    due_date_str = (
+        payment.due_date.strftime("%d/%m/%Y")
+        if language == "es"
+        else payment.due_date.strftime("%b %d, %Y")
+    )
+    days_until_due = (payment.due_date - date.today()).days
+    hardship = activity.hardship_flag if activity else False
+    streak = risk.missed_payment_streak if risk else 0
+
+    is_overdue = days_until_due < 0
+    days_desc = f"{abs(days_until_due)} días atrasado" if is_overdue else f"{days_until_due} días restantes"
+    if language == "en":
+        days_desc = f"{abs(days_until_due)} days late" if is_overdue else f"{days_until_due} days remaining"
+
+    # Try LLM generation if client is available
+    if ai_client:
+        sys_prompt = (
+            f"You are a payment reminder assistant for a bank. Write a short (under 50 words), "
+            f"warm, supportive, and non-judgmental chat message to {customer.full_name} in {'Spanish' if language == 'es' else 'English'}. "
+            f"Context: installment of ${amount_due:.2f} due on {due_date_str} ({days_desc}). "
+            f"Missed streak: {streak}. Hardship flag: {hardship}. "
+            f"Hard rules: Never threaten legal action or damage to credit score. "
+            f"Never shame the customer. Offer support, a flexible payment plan, or speaking with a specialist. "
+            f"If hardship is true, do not pressure for payment; prioritize offering help and human connection."
+        )
+        try:
+            res = await ai_client.messages.create(
+                model="deepseek-chat",
+                max_tokens=150,
+                system=sys_prompt,
+                messages=[{"role": "user", "content": "Please generate the reminder message."}],
+            )
+            candidate_text = res.content[0].text.strip()
+            if candidate_text and not output_violates_guardrails(candidate_text):
+                return candidate_text
+        except Exception:
+            pass
+
+    # Template fallback
+    if language == "es":
+        if hardship:
+            return (
+                f"Hola {customer.full_name}, sabemos que se pueden presentar situaciones imprevistas. "
+                f"Queremos recordarte que tienes una cuota de ${amount_due:.2f} pendiente, pero lo más importante es apoyarte. "
+                f"¿Deseas que te conectemos con un especialista para evaluar opciones flexibles?"
+            )
+        elif is_overdue:
+            return (
+                f"Hola {customer.full_name}, notamos que tu cuota de ${amount_due:.2f} con vencimiento el {due_date_str} "
+                f"se encuentra pendiente. Estamos a tu disposición para coordinar una alternativa de pago cómoda para ti."
+            )
+        else:
+            return (
+                f"Hola {customer.full_name}, te enviamos un cordial recordatorio de que tu próximo pago de ${amount_due:.2f} "
+                f"vencerá el {due_date_str}. Si deseas programar el abono o revisar tus fechas de pago, con gusto te asistimos."
+            )
+    else:
+        if hardship:
+            return (
+                f"Hi {customer.full_name}, we understand unexpected circumstances arise. "
+                f"We wanted to reach out regarding your installment of ${amount_due:.2f}. "
+                f"We are here to support you with flexible options or connect you with a specialist whenever you're ready."
+            )
+        elif is_overdue:
+            return (
+                f"Hi {customer.full_name}, we noticed your installment of ${amount_due:.2f} due on {due_date_str} "
+                f"is currently unpaid. We are here to help you get back on track with a flexible arrangement."
+            )
+        else:
+            return (
+                f"Hi {customer.full_name}, friendly reminder that your upcoming installment of ${amount_due:.2f} "
+                f"is scheduled for {due_date_str}. If you'd like to adjust your schedule or review payment options, we're here to help."
+            )
+
+
+def get_risk_reminder_candidates(db: Session) -> list[dict[str, Any]]:
+    """Query customers exceeding risk thresholds who have pending installments."""
+    today = date.today()
+    candidates = []
+
+    risk_features = (
+        db.query(models.RiskFeature)
+        .order_by(models.RiskFeature.as_of_date.desc())
+        .all()
+    )
+    latest_risks: dict[str, models.RiskFeature] = {}
+    for rf in risk_features:
+        if rf.customer_id not in latest_risks:
+            latest_risks[rf.customer_id] = rf
+
+    for customer_id, rf in latest_risks.items():
+        is_risky = (
+            rf.early_warning_flag
+            or (rf.missed_payment_streak and rf.missed_payment_streak >= 1)
+            or (rf.balance_trend_30d is not None and rf.balance_trend_30d <= -20.0)
+            or (rf.consecutive_partial_payments and rf.consecutive_partial_payments >= 2)
+        )
+        if not is_risky:
+            continue
+
+        customer = db.get(models.Customer, customer_id)
+        if not customer:
+            continue
+
+        next_payment = (
+            db.query(models.Payment)
+            .join(models.Account)
+            .filter(models.Account.customer_id == customer_id)
+            .filter(models.Payment.payment_date.is_(None))
+            .order_by(models.Payment.due_date.asc())
+            .first()
+        )
+        if not next_payment:
+            continue
+
+        latest_act = (
+            db.query(models.AccountActivity)
+            .filter_by(customer_id=customer_id)
+            .order_by(models.AccountActivity.snapshot_date.desc())
+            .first()
+        )
+        hardship = latest_act.hardship_flag if latest_act else False
+        days_until_due = (next_payment.due_date - today).days
+
+        last_assistant_msg = (
+            db.query(models.Message)
+            .join(models.Conversation)
+            .filter(models.Conversation.customer_id == customer_id)
+            .filter(models.Message.role == models.MessageRole.ASSISTANT)
+            .order_by(models.Message.created_at.desc())
+            .first()
+        )
+
+        candidates.append({
+            "customer_id": customer.id,
+            "customer_name": customer.full_name,
+            "customer_email": customer.email,
+            "early_warning_flag": rf.early_warning_flag,
+            "missed_payment_streak": rf.missed_payment_streak,
+            "consecutive_partial_payments": rf.consecutive_partial_payments,
+            "balance_trend_30d": float(rf.balance_trend_30d) if rf.balance_trend_30d is not None else None,
+            "hardship_flag": hardship,
+            "payment_id": next_payment.id,
+            "amount_due": float(next_payment.amount_due),
+            "due_date": next_payment.due_date.isoformat(),
+            "days_until_due": days_until_due,
+            "is_overdue": days_until_due < 0,
+            "last_reminder_at": last_assistant_msg.created_at.isoformat() if last_assistant_msg else None,
+        })
+
+    # Order candidates: overdue first, then by earliest due date
+    candidates.sort(key=lambda c: (not c["is_overdue"], c["days_until_due"]))
+    return candidates
+
 
 @app.websocket("/ws/chat/{room_id}")
 async def websocket_chat_endpoint(
@@ -761,10 +983,35 @@ async def websocket_chat_endpoint(
     sender_name: str = Query("User", description="Display name of the participant"),
 ):
     """WebSocket endpoint supporting real-time chat partitioned into rooms.
-
-    Simulates WhatsApp conversations with participants.
+    When room_id is a customer_id, it is backed by an active persistent Conversation in the DB.
     """
-    await chat_manager.connect(websocket, room_id, sender_name)
+    initial_history = []
+    is_customer_room = False
+    customer_name = None
+
+    db = SessionLocal()
+    try:
+        customer = db.get(models.Customer, room_id)
+        if customer:
+            is_customer_room = True
+            customer_name = customer.full_name
+            convo = get_or_create_active_conversation(db, customer.id)
+            for m in convo.messages:
+                name = "You" if m.role == models.MessageRole.USER else "Payment Assistant"
+                initial_history.append({
+                    "id": m.id,
+                    "room_id": room_id,
+                    "sender_name": name,
+                    "text": m.content,
+                    "type": "message",
+                    "timestamp": m.created_at.isoformat() if m.created_at else datetime.now(timezone.utc).isoformat(),
+                })
+    finally:
+        db.close()
+
+    await chat_manager.connect(
+        websocket, room_id, sender_name, initial_history=initial_history if initial_history else None
+    )
     try:
         while True:
             data = await websocket.receive_text()
@@ -777,11 +1024,35 @@ async def websocket_chat_endpoint(
                 text = data
                 msg_sender = sender_name
 
-            if text.strip():
+            cleaned_text = text.strip()
+            if cleaned_text:
+                if is_customer_room:
+                    # Persist message to DB Conversation
+                    db = SessionLocal()
+                    try:
+                        active_convo = get_or_create_active_conversation(db, room_id)
+                        role = (
+                            models.MessageRole.USER
+                            if msg_sender.lower() in ("you", "user", "customer") or msg_sender == customer_name
+                            else models.MessageRole.ASSISTANT
+                        )
+                        db_msg = models.Message(
+                            conversation_id=active_convo.id,
+                            role=role,
+                            content=cleaned_text,
+                            created_at=datetime.utcnow(),
+                            was_flagged=False,
+                        )
+                        db.add(db_msg)
+                        active_convo.last_message_at = datetime.utcnow()
+                        db.commit()
+                    finally:
+                        db.close()
+
                 msg = chat_manager.format_message(
                     room_id=room_id,
                     sender_name=msg_sender,
-                    text=text.strip(),
+                    text=cleaned_text,
                     msg_type="message",
                 )
                 await chat_manager.broadcast(room_id, msg)
@@ -871,6 +1142,101 @@ def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db
         }
         for m in convo.messages
     ]
+
+
+@app.get("/risk-reminders/candidates", tags=["Chat"])
+@app.get("/chat/risk-reminders/candidates", tags=["Chat"])
+def get_candidates_for_risk_reminders(db: Session = Depends(get_db)):
+    """List all customers beyond the risk threshold with unpaid installments who qualify for an AI reminder."""
+    return get_risk_reminder_candidates(db)
+
+
+@app.post("/risk-reminders/send", status_code=status.HTTP_201_CREATED, tags=["Chat"])
+@app.post("/chat/risk-reminders/send", status_code=status.HTTP_201_CREATED, tags=["Chat"])
+async def send_risk_reminder(payload: schemas.SendRiskReminderPayload, db: Session = Depends(get_db)):
+    """Generate, persist, and broadcast an AI debt-prevention reminder to an at-risk customer."""
+    customer = db.get(models.Customer, payload.customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Fetch earliest pending payment
+    payment = (
+        db.query(models.Payment)
+        .join(models.Account)
+        .filter(models.Account.customer_id == customer.id)
+        .filter(models.Payment.payment_date.is_(None))
+        .order_by(models.Payment.due_date.asc())
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=400, detail="Customer has no active unpaid installments")
+
+    risk = (
+        db.query(models.RiskFeature)
+        .filter_by(customer_id=customer.id)
+        .order_by(models.RiskFeature.as_of_date.desc())
+        .first()
+    )
+    activity = (
+        db.query(models.AccountActivity)
+        .filter_by(customer_id=customer.id)
+        .order_by(models.AccountActivity.snapshot_date.desc())
+        .first()
+    )
+
+    if payload.custom_message and payload.custom_message.strip():
+        reminder_text = payload.custom_message.strip()
+    else:
+        reminder_text = await generate_risk_reminder(
+            customer=customer,
+            payment=payment,
+            risk=risk,
+            activity=activity,
+            language=payload.language or "es",
+        )
+
+    violation = output_violates_guardrails(reminder_text)
+    was_flagged = violation is not None
+
+    # Resolve or create active conversation
+    convo = get_or_create_active_conversation(db, customer.id)
+    if activity and activity.hardship_flag:
+        convo.is_escalated = True
+
+    # Persist message
+    db_msg = models.Message(
+        conversation_id=convo.id,
+        role=models.MessageRole.ASSISTANT,
+        content=reminder_text,
+        created_at=datetime.utcnow(),
+        was_flagged=was_flagged,
+    )
+    db.add(db_msg)
+    convo.last_message_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_msg)
+
+    # Broadcast to customer's WebSocket room
+    ws_msg = chat_manager.format_message(
+        room_id=customer.id,
+        sender_name="Payment Assistant",
+        text=reminder_text,
+        msg_type="message",
+    )
+    await chat_manager.broadcast(customer.id, ws_msg)
+
+    return {
+        "success": True,
+        "conversation_id": convo.id,
+        "customer_id": customer.id,
+        "message": {
+            "id": db_msg.id,
+            "role": db_msg.role.value,
+            "content": db_msg.content,
+            "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
+            "flagged": db_msg.was_flagged,
+        },
+    }
 
 
 @app.get("/chat/{room_id}", response_class=HTMLResponse, tags=["Chat"])
