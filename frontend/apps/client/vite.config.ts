@@ -44,5 +44,6 @@ export default defineConfig({
       '/redoc': apiProxy(),
       '/openapi.json': apiProxy(),
     },
+    allowedHosts: true
   },
 })

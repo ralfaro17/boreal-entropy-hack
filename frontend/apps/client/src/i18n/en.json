@@ -290,5 +290,13 @@
     "optimalChannel": "Optimal Channel",
     "advisoryCall": "Customer typically prefers Chat; phone calls are still supported.",
     "advisoryChat": "Customer typically prefers Phone Calls; consider reaching out via Voice Call."
+  },
+  "tone": {
+    "radarTitle": "Adaptive Voice Tone",
+    "customerTone": "Customer Tone",
+    "aiTone": "AI Voice Mode",
+    "cadence": "Speech Cadence",
+    "signalsTitle": "Detected Signals",
+    "liveAdaptation": "Dynamic Voice Modulation"
   }
 }

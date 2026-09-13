@@ -785,6 +785,67 @@ def test_voice_interrupt():
     print("✓ Voice interruption endpoint passed")
 
 
+def test_voice_agent_reply_and_tone_adaptation():
+    """Verify that /voice/greeting and /voice/agent-reply compute and return dynamic tone profiles."""
+    cust_email = f"tone.test.{uuid.uuid4().hex[:6]}@example.com"
+    payload = {
+        "full_name": "Valeria Vulnerable",
+        "email": cust_email,
+        "credit_score": 580,
+        "employment_status": "unemployed",
+    }
+    res = client.post("/customers", json=payload)
+    assert res.status_code == 201
+    cust_id = res.json()["id"]
+
+    # 1. Greeting returns tone_profile reflecting behavioral priors
+    greet_res = client.get(f"/voice/greeting/{cust_id}")
+    assert greet_res.status_code == 200
+    greet_data = greet_res.json()
+    assert "tone_profile" in greet_data
+    assert greet_data["tone_profile"]["customer_tone"] == "anxious_hardship"
+    assert greet_data["tone_profile"]["playback_rate"] == 0.92
+    assert "0.92x" in greet_data["tone_profile"]["pacing_label_es"]
+
+    # 2. Agent reply with anxious customer utterance adapts voice to empathetic soothing
+    reply_res = client.post(
+        "/voice/agent-reply",
+        json={
+            "customer_id": cust_id,
+            "message": "No tengo dinero ahora, estoy muy angustiada con mis deudas",
+            "arousal": 0.75,
+            "valence": 0.20,
+            "emotion_label": "distressed",
+        },
+    )
+    assert reply_res.status_code == 200
+    reply_data = reply_res.json()
+    assert "reply" in reply_data
+    assert "tone_profile" in reply_data
+    assert reply_data["tone_profile"]["customer_tone"] == "anxious_hardship"
+    assert reply_data["tone_profile"]["ai_tone"] == "empathetic_soothing"
+    assert reply_data["tone_profile"]["playback_rate"] == 0.92
+
+    # 3. Agent reply with cooperative utterance adapts voice to collaborative efficient
+    coop_res = client.post(
+        "/voice/agent-reply",
+        json={
+            "customer_id": cust_id,
+            "message": "Sí claro, quiero pagar hoy mismo por transferencia, muchas gracias",
+            "arousal": 0.30,
+            "valence": 0.60,
+            "emotion_label": "calm",
+        },
+    )
+    assert coop_res.status_code == 200
+    coop_data = coop_res.json()
+    assert coop_data["tone_profile"]["customer_tone"] == "cooperative_receptive"
+    assert coop_data["tone_profile"]["ai_tone"] == "collaborative_efficient"
+    assert coop_data["tone_profile"]["playback_rate"] == 1.03
+
+    print("✓ Voice agent reply and tone adaptation endpoint passed")
+
+
 if __name__ == "__main__":
     test_system_endpoints()
     test_customer_crud()
@@ -797,6 +858,7 @@ if __name__ == "__main__":
     test_risk_reminders_and_customer_websocket()
     test_guardrails_rejection_and_distress_escalation()
     test_voice_interrupt()
+    test_voice_agent_reply_and_tone_adaptation()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
 
 

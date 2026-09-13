@@ -82,6 +82,7 @@ export interface PlayTtsOptions {
   localMonitor?: boolean;
   language?: string;
   signal?: AbortSignal;
+  playbackRate?: number;
 }
 
 export interface CallAudioGraph {
@@ -161,6 +162,9 @@ export function createCallAudioGraph(micStream: MediaStream): CallAudioGraph {
 
     const src = ctx.createBufferSource();
     src.buffer = audioBuf;
+    if (opts?.playbackRate && opts.playbackRate > 0) {
+      src.playbackRate.value = opts.playbackRate;
+    }
     src.connect(dest); // into the call
     if (opts?.localMonitor !== false) src.connect(ctx.destination); // local speakers
     currentTts = src;

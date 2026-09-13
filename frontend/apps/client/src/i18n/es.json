@@ -290,5 +290,13 @@
     "optimalChannel": "Canal Óptimo",
     "advisoryCall": "El cliente suele preferir Chat; las llamadas siguen disponibles.",
     "advisoryChat": "El cliente suele preferir Llamada Telefónica; considera contactarlo por Llamada IA."
+  },
+  "tone": {
+    "radarTitle": "Tono de Voz Adaptativo",
+    "customerTone": "Tono del Cliente",
+    "aiTone": "Modo de Voz IA",
+    "cadence": "Cadencia de Habla",
+    "signalsTitle": "Señales Detectadas",
+    "liveAdaptation": "Modulación Dinámica de Voz"
   }
 }

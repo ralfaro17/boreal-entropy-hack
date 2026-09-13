@@ -42,9 +42,25 @@ import {
   ExternalLink,
   Square,
   MessageSquare,
+  Sparkles,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { getChannelPreference } from '@/lib/channel-preference';
+
+export interface ToneProfile {
+  customer_tone: string;
+  customer_tone_label_es: string;
+  customer_tone_label_en: string;
+  ai_tone: string;
+  ai_tone_label_es: string;
+  ai_tone_label_en: string;
+  playback_rate: number;
+  pacing_label_es: string;
+  pacing_label_en: string;
+  rationale_es: string;
+  rationale_en: string;
+  signals: string[];
+}
 
 type AgentStatus = 'idle' | 'dialing' | 'in-call' | 'escalated' | 'ended';
 
@@ -87,8 +103,10 @@ export function AICall() {
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [agentMicOn, setAgentMicOn] = useState(false);
   const [monitorOn, setMonitorOn] = useState(false);
+  const [toneProfile, setToneProfile] = useState<ToneProfile | null>(null);
 
   const peerRef = useRef<Peer | null>(null);
+  const emotionRef = useRef<EmotionEvent | null>(null);
   const callRef = useRef<MediaConnection | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const graphRef = useRef<CallAudioGraph | null>(null);
@@ -172,6 +190,8 @@ export function AICall() {
     busyRef.current = false;
     currentAiTextRef.current = '';
     lastAiTurnIdRef.current = null;
+    setToneProfile(null);
+    emotionRef.current = null;
     setStatus((prev) => (prev === 'idle' ? 'idle' : finalStatus));
   }, []);
 
@@ -197,33 +217,37 @@ export function AICall() {
   /** Speak text into the call via backend TTS; interruptible via signal.
    * localMonitor=false: the AI voice reaches the agent through the portal side;
    * playing it locally too causes an echo/double-audio effect. */
-  const speak = useCallback(async (text: string, language = 'es') => {
-    if (!graphRef.current || stoppedRef.current) return;
-    setAiSpeakingState(true);
-    currentAiTextRef.current = text;
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  const speak = useCallback(
+    async (text: string, language = 'es', opts?: { playbackRate?: number }) => {
+      if (!graphRef.current || stoppedRef.current) return;
+      setAiSpeakingState(true);
+      currentAiTextRef.current = text;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-    try {
-      await graphRef.current.playTts(text, {
-        language,
-        localMonitor: false,
-        signal: controller.signal,
-      });
-    } catch {
-      if (!controller.signal.aborted) {
-        showErrorToast(t('aiCall.ttsError'));
+      try {
+        await graphRef.current.playTts(text, {
+          language,
+          localMonitor: false,
+          signal: controller.signal,
+          playbackRate: opts?.playbackRate,
+        });
+      } catch {
+        if (!controller.signal.aborted) {
+          showErrorToast(t('aiCall.ttsError'));
+        }
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+        setAiSpeakingState(false);
+        currentAiTextRef.current = '';
       }
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
-      setAiSpeakingState(false);
-      currentAiTextRef.current = '';
-    }
-  }, [setAiSpeakingState, t]);
+    },
+    [setAiSpeakingState, t]
+  );
 
-  /** One agent turn: customer's final transcript -> LLM reply -> TTS. */
+  /** One agent turn: customer's final transcript -> LLM reply -> TTS with tone adaptation. */
   const handleCustomerUtterance = useCallback(async (text: string, custId: string) => {
     if (stoppedRef.current) return;
 
@@ -236,19 +260,38 @@ export function AICall() {
     busyRef.current = true;
 
     try {
+      const em = emotionRef.current;
       const res = await fetch('/voice/agent-reply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer_id: custId, message: text }),
+        body: JSON.stringify({
+          customer_id: custId,
+          message: text,
+          arousal: em?.arousal,
+          valence: em?.valence,
+          pitch_hz: em?.pitch_hz,
+          emotion_label: em?.label,
+        }),
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
       if (!res.ok) throw new Error(`agent-reply ${res.status}`);
-      const data: { reply: string; escalated: boolean; language?: string } = await res.json();
+      const data: {
+        reply: string;
+        escalated: boolean;
+        language?: string;
+        tone_profile?: ToneProfile;
+      } = await res.json();
       if (controller.signal.aborted || stoppedRef.current) return;
 
+      if (data.tone_profile) {
+        setToneProfile(data.tone_profile);
+      }
+
       addTurn('ai', data.reply);
-      await speak(data.reply, data.language ?? 'es');
+      await speak(data.reply, data.language ?? 'es', {
+        playbackRate: data.tone_profile?.playback_rate,
+      });
 
       if (data.escalated) {
         setStatus('escalated');
@@ -272,6 +315,8 @@ export function AICall() {
     stoppedRef.current = false;
     setTurns([]);
     setEmotion(null);
+    emotionRef.current = null;
+    setToneProfile(null);
     setStatus('dialing');
 
     try {
@@ -322,6 +367,7 @@ export function AICall() {
           // persist=false: /voice/agent-reply persists each utterance itself.
           const ws = openVoiceSocket(custId, 'customer', (ev) => {
             if (ev.type === 'emotion') {
+              emotionRef.current = ev;
               setEmotion(ev);
               return;
             }
@@ -356,14 +402,19 @@ export function AICall() {
             if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
           });
 
-          // Opening line: compliant AI reminder greeting (Spanish-first)
+          // Opening line: compliant AI reminder greeting with tone adaptation (Spanish-first)
           try {
             const res = await fetch(`/voice/greeting/${custId}`);
             if (res.ok) {
-              const { greeting, language } = await res.json();
-              if (!stoppedRef.current) {
+              const { greeting, language, tone_profile } = await res.json();
+              if (tone_profile) {
+                setToneProfile(tone_profile);
+              }
+              if (!stoppedRef.current && greeting) {
                 addTurn('ai', greeting);
-                await speak(greeting, language ?? 'es');
+                await speak(greeting, language ?? 'es', {
+                  playbackRate: tone_profile?.playback_rate,
+                });
               }
             }
           } catch {
@@ -637,6 +688,75 @@ export function AICall() {
                 </p>
               </div>
             )}
+
+            {/* Adaptive Tone Radar */}
+            {inSession && toneProfile && (
+              <div className="rounded-lg border p-3.5 space-y-2.5 bg-card/60">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    <span>{t('tone.radarTitle', 'Adaptive Voice Tone')}</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-mono">
+                    {i18n.language.startsWith('es') ? toneProfile.pacing_label_es : toneProfile.pacing_label_en}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 rounded border bg-muted/30 space-y-1">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider block font-medium">
+                      {t('tone.customerTone', 'Customer Tone')}
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className={`text-[10px] font-medium py-0.5 px-1.5 ${
+                        toneProfile.customer_tone === 'anxious_hardship'
+                          ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30'
+                          : toneProfile.customer_tone === 'frustrated_defensive'
+                          ? 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-500/30'
+                          : toneProfile.customer_tone === 'cooperative_receptive'
+                          ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
+                          : toneProfile.customer_tone === 'confused_uncertain'
+                          ? 'bg-sky-500/15 text-sky-800 dark:text-sky-300 border-sky-500/30'
+                          : 'bg-muted text-foreground'
+                      }`}
+                    >
+                      {i18n.language.startsWith('es')
+                        ? toneProfile.customer_tone_label_es
+                        : toneProfile.customer_tone_label_en}
+                    </Badge>
+                  </div>
+
+                  <div className="p-2 rounded border bg-muted/30 space-y-1">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider block font-medium">
+                      {t('tone.aiTone', 'AI Voice Mode')}
+                    </span>
+                    <Badge
+                      variant="default"
+                      className={`text-[10px] font-medium py-0.5 px-1.5 ${
+                        toneProfile.ai_tone === 'empathetic_soothing'
+                          ? 'bg-purple-600 hover:bg-purple-600 text-white'
+                          : toneProfile.ai_tone === 'de_escalating_calm'
+                          ? 'bg-blue-600 hover:bg-blue-600 text-white'
+                          : toneProfile.ai_tone === 'collaborative_efficient'
+                          ? 'bg-emerald-600 hover:bg-emerald-600 text-white'
+                          : toneProfile.ai_tone === 'clear_supportive'
+                          ? 'bg-teal-600 hover:bg-teal-600 text-white'
+                          : 'bg-primary'
+                      }`}
+                    >
+                      {i18n.language.startsWith('es')
+                        ? toneProfile.ai_tone_label_es
+                        : toneProfile.ai_tone_label_en}
+                    </Badge>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {i18n.language.startsWith('es') ? toneProfile.rationale_es : toneProfile.rationale_en}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -651,15 +771,25 @@ export function AICall() {
                 <CardTitle className="text-base">{t('aiCall.liveConversation')}</CardTitle>
                 <CardDescription className="text-xs">{t('aiCall.liveConversationHint')}</CardDescription>
               </div>
+              {toneProfile && (
+                <Badge
+                  variant="outline"
+                  className="hidden sm:inline-flex items-center gap-1 text-[11px] py-0 px-2 border-primary/30 text-primary ml-auto"
+                  title={i18n.language.startsWith('es') ? toneProfile.rationale_es : toneProfile.rationale_en}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {i18n.language.startsWith('es') ? toneProfile.ai_tone_label_es : toneProfile.ai_tone_label_en}
+                </Badge>
+              )}
               {aiSpeaking ? (
-                <Badge variant="secondary" className="ml-auto gap-1.5">
+                <Badge variant="secondary" className={`${toneProfile ? '' : 'ml-auto'} gap-1.5`}>
                   <Bot className="h-3 w-3 animate-pulse" />
                   {t('aiCall.speakingBadge')}
                 </Badge>
               ) : status === 'in-call' ? (
                 <Badge
                   variant="outline"
-                  className="ml-auto gap-1.5 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  className={`${toneProfile ? '' : 'ml-auto'} gap-1.5 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10`}
                 >
                   <Radio className="h-3 w-3 animate-pulse" />
                   {t('aiCall.statusListening', 'Listening')}
