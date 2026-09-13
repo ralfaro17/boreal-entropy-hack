@@ -72,11 +72,17 @@ export async function startPcmCapture(
   };
 }
 
+/** Deepgram Aura voices per language (Spanish-first product policy). */
+export const TTS_VOICES: Record<string, string> = {
+  es: 'aura-2-celeste-es',
+  en: 'aura-2-asteria-en',
+};
+
 export interface CallAudioGraph {
   /** Stream to hand to peer.call(): mic + TTS mixed together. */
   outgoingStream: MediaStream;
   /** Play AI TTS audio into the call (both parties hear it). */
-  playTts: (text: string, opts?: { localMonitor?: boolean }) => Promise<void>;
+  playTts: (text: string, opts?: { localMonitor?: boolean; language?: string }) => Promise<void>;
   /** Stop any TTS currently playing. */
   stopTts: () => void;
   close: () => void;
@@ -99,11 +105,12 @@ export function createCallAudioGraph(micStream: MediaStream): CallAudioGraph {
 
   let currentTts: AudioBufferSourceNode | null = null;
 
-  const playTts = async (text: string, opts?: { localMonitor?: boolean }) => {
+  const playTts = async (text: string, opts?: { localMonitor?: boolean; language?: string }) => {
+    const model = TTS_VOICES[opts?.language ?? 'es'] ?? TTS_VOICES.es;
     const res = await fetch('/voice/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, encoding: 'mp3' }),
+      body: JSON.stringify({ text, encoding: 'mp3', model }),
     });
     if (!res.ok) {
       // 501 => no API key configured; caller may fall back to Web Speech API.
@@ -142,15 +149,19 @@ export function speakWithWebSpeech(text: string): Promise<void> {
   });
 }
 
-/** Open the STT/emotion WebSocket for a room. */
+/** Open the STT/emotion WebSocket for a room.
+ * Set opts.persist=false when another flow (e.g. /voice/agent-reply) already
+ * persists transcripts, to avoid duplicate Message rows. */
 export function openVoiceSocket(
   roomId: string,
   speaker: string,
   onEvent: (ev: VoiceSocketEvent) => void,
+  opts?: { persist?: boolean },
 ): WebSocket {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const persist = opts?.persist ?? true;
   const ws = new WebSocket(
-    `${protocol}//${window.location.host}/ws/stt/${encodeURIComponent(roomId)}?speaker=${encodeURIComponent(speaker)}`,
+    `${protocol}//${window.location.host}/ws/stt/${encodeURIComponent(roomId)}?speaker=${encodeURIComponent(speaker)}&persist=${persist}`,
   );
   ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => {

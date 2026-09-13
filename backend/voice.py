@@ -41,9 +41,10 @@ DEEPGRAM_STT_URL = (
     "wss://api.deepgram.com/v1/listen"
     "?encoding=linear16&sample_rate=16000&channels=1"
     "&interim_results=true&punctuate=true&smart_format=true&model=nova-2"
+    "&language=multi"  # Spanish-first product; customers may also speak English
 )
 DEEPGRAM_TTS_URL = "https://api.deepgram.com/v1/speak"
-DEFAULT_TTS_MODEL = "aura-2-asteria-es"
+DEFAULT_TTS_MODEL = "aura-2-celeste-es"  # Spanish (Colombian); use aura-2-asteria-en for English
 
 
 def stt_available() -> bool:

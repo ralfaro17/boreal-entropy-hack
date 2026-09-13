@@ -831,6 +831,55 @@ def record_conversation_event(
     return event
 
 
+# ---------------------------------------------------------------------------
+# Language policy: ALL AI messages default to Spanish. English is used only
+# when the customer explicitly requests it (and Spanish can be re-requested).
+# The preference is sticky across the conversation.
+# ---------------------------------------------------------------------------
+
+ENGLISH_REQUEST_RE = re.compile(
+    r"\b(in english|english,? please|speak english|talk (to me )?in english|"
+    r"switch to english|respond in english|reply in english|answer in english|"
+    r"can (you|we) (talk|speak|do this) in english|prefiero (el )?ingl[eé]s|"
+    r"en ingl[eé]s,? por favor|h[aá]blame en ingl[eé]s)\b",
+    re.IGNORECASE,
+)
+
+SPANISH_REQUEST_RE = re.compile(
+    r"\b(in spanish|spanish,? please|speak spanish|switch to spanish|"
+    r"respond in spanish|en espa[ñn]ol|habla(me)? (en )?espa[ñn]ol|"
+    r"prefiero (el )?espa[ñn]ol|volvamos al espa[ñn]ol)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_conversation_language(
+    user_message: str,
+    convo: models.Conversation | None = None,
+) -> str:
+    """Return 'es' unless the customer explicitly asked for English.
+
+    The most recent explicit language request wins (checked across prior user
+    turns in the conversation, then the current message), so a customer who
+    asked for English stays in English until they ask for Spanish again.
+    """
+    def apply(text: str, current: str) -> str:
+        # Evaluate both patterns; the one that matches decides. If both match
+        # (e.g. "switch to english, not spanish"), prefer the explicit English ask.
+        if ENGLISH_REQUEST_RE.search(text):
+            return "en"
+        if SPANISH_REQUEST_RE.search(text):
+            return "es"
+        return current
+
+    lang = "es"
+    if convo is not None:
+        for m in convo.messages:
+            if m.role == models.MessageRole.USER:
+                lang = apply(m.content, lang)
+    return apply(user_message, lang)
+
+
 async def generate_risk_reminder(
     customer: models.Customer,
     payment: models.Payment,
@@ -940,10 +989,9 @@ async def generate_customer_chat_reply(
     """Generate a supportive, compliant response from the payment assistant to a customer's message,
     hardened with defense-in-depth against off-topic drift, prompt injection, and compliance violations.
     """
-    # Detect language: if English keywords found, respond in English, otherwise default to Spanish
-    lang = "es"
-    if re.search(r"\b(hello|hi|help|due|payment|reschedule|can i|thank|how much|recipe|cake|bake|formula|code|python|math)\b", user_message.lower()):
-        lang = "en"
+    # Language policy: Spanish by default; English only if explicitly requested
+    # (sticky across the conversation via prior user turns).
+    lang = detect_conversation_language(user_message, convo)
 
     # Layer 1: Deterministic fast-path guardrail for off-topic non-banking content
     is_off_topic, cat = detect_off_topic(user_message)
@@ -1034,9 +1082,11 @@ async def generate_customer_chat_reply(
             if m.role == models.MessageRole.USER and detect_off_topic(m.content)[0]:
                 continue
             role = "user" if m.role == models.MessageRole.USER else "assistant"
-            if role == "user" and m.content.strip() == user_message.strip():
+            # Strip the "[voice]" storage prefix so the LLM never mimics it
+            content = m.content.removeprefix("[voice] ")
+            if role == "user" and content.strip() == user_message.strip():
                 continue
-            raw_turns.append({"role": role, "content": m.content})
+            raw_turns.append({"role": role, "content": content})
 
         raw_turns.append({"role": "user", "content": user_message})
 
@@ -1288,9 +1338,7 @@ async def websocket_chat_endpoint(
 
                         # If distress detected, trigger immediate empathetic handoff message
                         if is_distressed:
-                            lang = "es"
-                            if re.search(r"\b(job|money|afford|hospital|evict|funeral|laid off)\b", cleaned_text.lower()):
-                                lang = "en"
+                            lang = detect_conversation_language(cleaned_text, active_convo)
                             reply_text = get_escalation_reply(lang)
                             asst_db_msg = models.Message(
                                 conversation_id=active_convo.id,
@@ -1574,6 +1622,7 @@ async def websocket_stt_endpoint(
     websocket: WebSocket,
     room_id: str,
     speaker: str = Query("customer", description="Logical speaker label for this audio stream"),
+    persist: bool = Query(True, description="Persist final transcripts as Messages (disable when another flow persists them)"),
 ):
     """Receive 16 kHz mono Int16 PCM binary frames; stream back JSON:
       {"type": "partial"|"final", "text", "speaker"}  — live transcription
@@ -1601,7 +1650,7 @@ async def websocket_stt_endpoint(
             async def forward_transcripts():
                 async for result in stt_session.transcripts():
                     payload = {**result, "speaker": speaker}
-                    if result["type"] == "final":
+                    if result["type"] == "final" and persist:
                         info = await asyncio.to_thread(
                             _persist_final_transcript, room_id, speaker, result["text"]
                         )
@@ -1686,10 +1735,11 @@ async def voice_agent_reply(payload: AgentReplyPayload, db: Session = Depends(ge
                 description="Automated voice agent stopped; customer routed to human hardship specialist.",
                 metadata={"channel": "voice"},
             )
-        lang = "en" if re.search(r"\b(job|money|afford|hospital|evict|funeral|laid off)\b", text.lower()) else "es"
+        lang = detect_conversation_language(text, convo)
         reply = get_escalation_reply(lang)
         escalated = True
     else:
+        lang = detect_conversation_language(text, convo)
         reply = await generate_customer_chat_reply(
             db=db, customer=customer, convo=convo, user_message=text
         )
@@ -1705,7 +1755,7 @@ async def voice_agent_reply(payload: AgentReplyPayload, db: Session = Depends(ge
     convo.last_message_at = datetime.utcnow()
     db.commit()
 
-    return {"reply": reply, "escalated": escalated, "conversation_id": convo.id}
+    return {"reply": reply, "escalated": escalated, "language": lang, "conversation_id": convo.id}
 
 
 @app.get("/voice/greeting/{customer_id}", tags=["Voice"])
@@ -1724,6 +1774,11 @@ async def voice_agent_greeting(customer_id: str, db: Session = Depends(get_db)):
         .order_by(models.Payment.due_date.asc())
         .first()
     )
+    # Spanish-first policy: greetings always open in Spanish; English only
+    # if the customer explicitly asked for it earlier in the conversation.
+    convo = get_or_create_active_conversation(db, customer.id)
+    lang = detect_conversation_language("", convo)
+
     if payment:
         risk = (
             db.query(models.RiskFeature)
@@ -1737,14 +1792,17 @@ async def voice_agent_greeting(customer_id: str, db: Session = Depends(get_db)):
             .order_by(models.AccountActivity.snapshot_date.desc())
             .first()
         )
-        greeting = await generate_risk_reminder(customer, payment, risk, act, language="en")
+        greeting = await generate_risk_reminder(customer, payment, risk, act, language=lang)
+    elif lang == "es":
+        greeting = (
+            f"Hola {customer.full_name}, le habla el asistente de Boreal Bank. "
+            f"Queremos saber cómo podemos apoyarle con su cuenta. ¿En qué le podemos ayudar hoy?"
+        )
     else:
         greeting = (
             f"Hello {customer.full_name}, this is the Boreal Bank assistant. "
             f"We're checking in to see how we can support you with your account. How can we help today?"
         )
-
-    convo = get_or_create_active_conversation(db, customer.id)
     db.add(models.Message(
         conversation_id=convo.id,
         role=models.MessageRole.ASSISTANT,
@@ -1755,7 +1813,7 @@ async def voice_agent_greeting(customer_id: str, db: Session = Depends(get_db)):
     convo.last_message_at = datetime.utcnow()
     db.commit()
 
-    return {"greeting": greeting, "conversation_id": convo.id}
+    return {"greeting": greeting, "language": lang, "conversation_id": convo.id}
 
 
 class TTSPayload(PydanticBaseModel):

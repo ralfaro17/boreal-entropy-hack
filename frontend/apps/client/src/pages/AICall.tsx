@@ -127,11 +127,11 @@ export function AICall() {
   };
 
   /** Speak text into the call via backend TTS; disable listening while talking. */
-  const speak = useCallback(async (text: string) => {
+  const speak = useCallback(async (text: string, language = 'es') => {
     if (!graphRef.current) return;
     setAiSpeaking(true);
     try {
-      await graphRef.current.playTts(text);
+      await graphRef.current.playTts(text, { language });
     } catch {
       showErrorToast(t('aiCall.ttsError'));
     } finally {
@@ -150,9 +150,9 @@ export function AICall() {
         body: JSON.stringify({ customer_id: custId, message: text }),
       });
       if (!res.ok) throw new Error(`agent-reply ${res.status}`);
-      const data: { reply: string; escalated: boolean } = await res.json();
+      const data: { reply: string; escalated: boolean; language?: string } = await res.json();
       addTurn('ai', data.reply);
-      await speak(data.reply);
+      await speak(data.reply, data.language ?? 'es');
       if (data.escalated) {
         setStatus('escalated');
         stoppedRef.current = true; // freeze the loop; human takes over
@@ -210,7 +210,8 @@ export function AICall() {
             void remoteAudioRef.current.play().catch(() => undefined);
           }
 
-          // STT + emotion over the *customer's* remote audio
+          // STT + emotion over the *customer's* remote audio.
+          // persist=false: /voice/agent-reply persists each utterance itself.
           const ws = openVoiceSocket(custId, 'customer', (ev) => {
             if (ev.type === 'emotion') {
               setEmotion(ev);
@@ -224,7 +225,7 @@ export function AICall() {
                 void handleCustomerUtterance(ev.text, custId);
               }
             }
-          });
+          }, { persist: false });
           socketRef.current = ws;
           await new Promise<void>((resolve) => {
             ws.onopen = () => resolve();
@@ -234,13 +235,13 @@ export function AICall() {
             if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
           });
 
-          // Opening line: compliant AI reminder greeting
+          // Opening line: compliant AI reminder greeting (Spanish-first)
           try {
             const res = await fetch(`/voice/greeting/${custId}`);
             if (res.ok) {
-              const { greeting } = await res.json();
+              const { greeting, language } = await res.json();
               addTurn('ai', greeting);
-              await speak(greeting);
+              await speak(greeting, language ?? 'es');
             }
           } catch {
             // greeting failure is non-fatal; agent will respond reactively
