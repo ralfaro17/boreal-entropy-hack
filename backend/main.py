@@ -3,6 +3,10 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+import models
+import schemas
+from chat import chat_manager
+from database import check_db_connection, get_db, init_db
 from fastapi import (
     Depends,
     FastAPI,
@@ -16,11 +20,6 @@ from fastapi import (
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-import models
-import schemas
-from chat import chat_manager
-from database import check_db_connection, get_db, init_db
 
 
 @asynccontextmanager

@@ -1,7 +1,5 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
-
 from models import (
     Channel,
     EmploymentStatus,
@@ -9,7 +7,7 @@ from models import (
     PaymentStatus,
     ProductType,
 )
-
+from pydantic import BaseModel, ConfigDict
 
 # ---------------------------------------------------------------------------
 # Customer Schemas

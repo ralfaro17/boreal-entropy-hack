@@ -21,9 +21,11 @@ from sqlalchemy import (
     Numeric,
     String,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from database import Base
+
+class Base(DeclarativeBase):
+    pass
 
 
 def gen_uuid() -> str:
@@ -94,15 +96,10 @@ class Customer(Base):
     credit_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    accounts: Mapped[list["Account"]] = relationship(
-        back_populates="customer", cascade="all, delete-orphan"
-    )
-    activities: Mapped[list["AccountActivity"]] = relationship(
-        back_populates="customer", cascade="all, delete-orphan"
-    )
-    risk_features: Mapped[list["RiskFeature"]] = relationship(
-        back_populates="customer", cascade="all, delete-orphan"
-    )
+    accounts: Mapped[list["Account"]] = relationship(back_populates="customer")
+    activities: Mapped[list["AccountActivity"]] = relationship(back_populates="customer")
+    risk_features: Mapped[list["RiskFeature"]] = relationship(back_populates="customer")
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="customer")
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +119,7 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="accounts")
-    payments: Mapped[list["Payment"]] = relationship(
-        back_populates="account", cascade="all, delete-orphan"
-    )
+    payments: Mapped[list["Payment"]] = relationship(back_populates="account")
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +204,42 @@ class RiskFeature(Base):
     days_to_default: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="risk_features")
+
+
+# ---------------------------------------------------------------------------
+# Conversations (chat persistence)
+# ---------------------------------------------------------------------------
+
+class MessageRole(str, enum.Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"))
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    channel: Mapped[Channel | None] = mapped_column(Enum(Channel), nullable=True)
+    is_escalated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    customer: Mapped["Customer"] = relationship(back_populates="conversations")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", order_by="Message.created_at"
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"))
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole))
+    content: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    was_flagged: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
