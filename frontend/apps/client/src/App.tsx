@@ -9,6 +9,7 @@ import { CustomerDetail } from './pages/CustomerDetail';
 import { Payments } from './pages/Payments';
 import { Chat } from './pages/Chat';
 import { CustomerChat } from './pages/CustomerChat';
+import { Call } from './pages/Call';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,6 +79,14 @@ function App() {
             element={
               <InternalLayout>
                 <Chat />
+              </InternalLayout>
+            }
+          />
+          <Route
+            path="/call"
+            element={
+              <InternalLayout>
+                <Call />
               </InternalLayout>
             }
           />

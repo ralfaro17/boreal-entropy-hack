@@ -38,6 +38,8 @@ export default defineConfig({
       '/chat': apiProxy(),
       '/conversations': apiProxy(),
       '/risk-reminders': apiProxy(),
+      '/voice': apiProxy(),
+      '/tts': apiProxy(),
       '/docs': apiProxy(),
       '/redoc': apiProxy(),
       '/openapi.json': apiProxy(),

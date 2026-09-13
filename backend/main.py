@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -28,9 +29,12 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
+
+import voice
+from pydantic import BaseModel as PydanticBaseModel
 
 
 @asynccontextmanager
@@ -1419,6 +1423,189 @@ def get_conversation_events(conversation_id: str, db: Session = Depends(get_db))
         for e in events
     ]
 
+
+
+# ===========================================================================
+# Voice: streaming STT relay + prosody emotion extraction + TTS
+# ===========================================================================
+
+@app.get("/voice/config", tags=["Voice"])
+def voice_config():
+    """Report availability of the voice pipeline features to the client."""
+    return {
+        "stt_available": voice.stt_available(),
+        "tts_available": voice.tts_available(),
+        "emotion_available": True,
+        "sample_rate": voice.SAMPLE_RATE,
+    }
+
+
+def _persist_final_transcript(room_id: str, speaker: str, text: str) -> dict | None:
+    """Persist a final STT transcript as a Message when room_id is a customer id.
+    Returns escalation info when sustained voice distress or text distress triggers."""
+    db = SessionLocal()
+    try:
+        customer = db.get(models.Customer, room_id)
+        if not customer:
+            return None
+        convo = get_or_create_active_conversation(db, customer.id)
+        is_customer = speaker.lower() in ("customer", "user", "you") or speaker == customer.full_name
+        role = models.MessageRole.USER if is_customer else models.MessageRole.ASSISTANT
+
+        is_distressed = False
+        cats: list[str] = []
+        if is_customer:
+            is_distressed, cats = detect_customer_distress(text)
+
+        db.add(models.Message(
+            conversation_id=convo.id,
+            role=role,
+            content=f"[voice] {text}"[:2000],
+            created_at=datetime.utcnow(),
+            was_flagged=is_distressed,
+        ))
+        if is_distressed and not convo.is_escalated:
+            convo.is_escalated = True
+            convo.escalated_at = datetime.utcnow()
+            convo.escalation_reason = f"Distress detected in voice call: {', '.join(cats)}"
+            record_conversation_event(
+                db=db,
+                conversation_id=convo.id,
+                event_type=models.ConversationEventType.CUSTOMER_DISTRESS_DETECTED,
+                title="Customer Distress Detected (Voice)",
+                description=f"Distress detected in live call transcript ({', '.join(cats)}).",
+                metadata={"categories": cats, "trigger_snippet": text[:200]},
+            )
+        convo.last_message_at = datetime.utcnow()
+        db.commit()
+        return {"escalated": is_distressed, "categories": cats}
+    finally:
+        db.close()
+
+
+def _record_voice_emotion_escalation(room_id: str, frame: dict) -> None:
+    """Escalate a conversation when sustained voice distress is detected prosodically."""
+    db = SessionLocal()
+    try:
+        customer = db.get(models.Customer, room_id)
+        if not customer:
+            return
+        convo = get_or_create_active_conversation(db, customer.id)
+        if convo.is_escalated:
+            return
+        convo.is_escalated = True
+        convo.escalated_at = datetime.utcnow()
+        convo.escalation_reason = "Sustained vocal distress detected during live call"
+        record_conversation_event(
+            db=db,
+            conversation_id=convo.id,
+            event_type=models.ConversationEventType.CUSTOMER_DISTRESS_DETECTED,
+            title="Vocal Distress Detected (Prosody)",
+            description="Audio emotion analysis detected sustained high-arousal/low-valence speech.",
+            metadata={
+                "arousal": frame.get("arousal"),
+                "valence": frame.get("valence"),
+                "label": frame.get("label"),
+                "advisory_only": True,
+            },
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.websocket("/ws/stt/{room_id}")
+async def websocket_stt_endpoint(
+    websocket: WebSocket,
+    room_id: str,
+    speaker: str = Query("customer", description="Logical speaker label for this audio stream"),
+):
+    """Receive 16 kHz mono Int16 PCM binary frames; stream back JSON:
+      {"type": "partial"|"final", "text", "speaker"}  — live transcription
+      {"type": "emotion", ...}                        — prosody emotion frames (~1/s)
+
+    STT requires DEEPGRAM_API_KEY; emotion analysis always runs.
+    Final transcripts are persisted as Messages when room_id is a customer id.
+    """
+    await websocket.accept()
+    analyzer = voice.ProsodyEmotionAnalyzer(speaker=speaker)
+    use_stt = voice.stt_available()
+    await websocket.send_json({
+        "type": "ready",
+        "stt": use_stt,
+        "emotion": True,
+        "speaker": speaker,
+    })
+
+    stt_session = None
+    forward_task = None
+    try:
+        if use_stt:
+            stt_session = await voice.DeepgramSession().__aenter__()
+
+            async def forward_transcripts():
+                async for result in stt_session.transcripts():
+                    payload = {**result, "speaker": speaker}
+                    if result["type"] == "final":
+                        info = await asyncio.to_thread(
+                            _persist_final_transcript, room_id, speaker, result["text"]
+                        )
+                        if info:
+                            payload["persisted"] = True
+                            payload["escalated"] = info["escalated"]
+                    await websocket.send_json(payload)
+
+            forward_task = asyncio.create_task(forward_transcripts())
+
+        while True:
+            chunk = await websocket.receive_bytes()
+            if stt_session:
+                await stt_session.send_audio(chunk)
+            analyzer.feed(chunk)
+            if analyzer.ready():
+                frame = await asyncio.to_thread(analyzer.analyze)
+                if frame:
+                    await websocket.send_json(frame)
+                    if frame.get("sustained_distress"):
+                        await asyncio.to_thread(_record_voice_emotion_escalation, room_id, frame)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if forward_task:
+            forward_task.cancel()
+        if stt_session:
+            await stt_session.__aexit__(None, None, None)
+
+
+class TTSPayload(PydanticBaseModel):
+    text: str
+    model: str | None = None
+    encoding: str = "mp3"  # "mp3" for playback, "linear16" for WebAudio mixing
+
+
+@app.post("/tts", tags=["Voice"])
+@app.post("/voice/tts", tags=["Voice"])
+async def text_to_speech(payload: TTSPayload):
+    """Stream synthesized speech for the given text (Deepgram Aura proxy).
+    Outgoing speech is compliance-checked with the same guardrails as chat."""
+    if not voice.tts_available():
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="TTS unavailable: DEEPGRAM_API_KEY is not configured",
+        )
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    try:
+        validate_compliance_or_raise(text, context="Outgoing TTS message")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    media_type = "audio/mpeg" if payload.encoding == "mp3" else "application/octet-stream"
+    return StreamingResponse(
+        voice.stream_tts(text, model=payload.model or voice.DEFAULT_TTS_MODEL, encoding=payload.encoding),
+        media_type=media_type,
+    )
 
 
 @app.get("/risk-reminders/candidates", tags=["Chat"])

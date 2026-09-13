@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router';
-import { LayoutDashboard, Users, CreditCard, MessageSquare, Moon, Sun, Menu, Globe, Snowflake } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, MessageSquare, Phone, Moon, Sun, Menu, Globe, Snowflake } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -28,6 +28,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     { to: '/customers', icon: Users, label: t('nav.customers') },
     { to: '/payments', icon: CreditCard, label: t('nav.payments') },
     { to: '/chat', icon: MessageSquare, label: t('nav.chat') },
+    { to: '/call', icon: Phone, label: t('nav.call') },
   ];
 
   return (
