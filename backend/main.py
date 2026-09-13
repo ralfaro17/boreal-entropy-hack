@@ -1218,6 +1218,15 @@ async def websocket_chat_endpoint(
                         active_convo.last_message_at = datetime.utcnow()
                         db.commit()
 
+                        # Broadcast user message immediately so all participants receive instant visual feedback
+                        user_msg = chat_manager.format_message(
+                            room_id=room_id,
+                            sender_name=msg_sender,
+                            text=cleaned_text,
+                            msg_type="message",
+                        )
+                        await chat_manager.broadcast(room_id, user_msg)
+
                         # If distress detected, trigger immediate empathetic handoff message
                         if is_distressed:
                             lang = "es"
@@ -1266,14 +1275,14 @@ async def websocket_chat_endpoint(
                             escalation_msg = reply_text
                     finally:
                         db.close()
-
-                msg = chat_manager.format_message(
-                    room_id=room_id,
-                    sender_name=msg_sender,
-                    text=cleaned_text,
-                    msg_type="message",
-                )
-                await chat_manager.broadcast(room_id, msg)
+                else:
+                    msg = chat_manager.format_message(
+                        room_id=room_id,
+                        sender_name=msg_sender,
+                        text=cleaned_text,
+                        msg_type="message",
+                    )
+                    await chat_manager.broadcast(room_id, msg)
 
                 if escalation_msg:
                     asst_ws_msg = chat_manager.format_message(
@@ -1283,6 +1292,7 @@ async def websocket_chat_endpoint(
                         msg_type="message",
                     )
                     await chat_manager.broadcast(room_id, asst_ws_msg)
+
     except WebSocketDisconnect:
         await chat_manager.disconnect(websocket, room_id)
 

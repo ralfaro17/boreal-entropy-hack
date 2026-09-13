@@ -365,6 +365,29 @@
             roomStatus.textContent = "online";
         };
 
+        let typingRow = null;
+
+        function showTypingIndicator() {
+            if (typingRow) return;
+            typingRow = document.createElement("div");
+            typingRow.className = "message-row theirs";
+            typingRow.innerHTML = `
+                <div class="bubble theirs" style="font-style: italic; color: #54656f; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                    <div class="sender-label" style="margin-bottom:0;">Payment Assistant</div>
+                    <span>Escribiendo respuesta / Thinking...</span>
+                </div>
+            `;
+            messagesContainer.appendChild(typingRow);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            if (typingRow && typingRow.parentNode) {
+                typingRow.parentNode.removeChild(typingRow);
+            }
+            typingRow = null;
+        }
+
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -372,6 +395,11 @@
                     messagesContainer.innerHTML = "";
                     (data.messages || []).forEach(appendMessage);
                 } else {
+                    if (data.sender_name === getSenderName()) {
+                        showTypingIndicator();
+                    } else {
+                        hideTypingIndicator();
+                    }
                     appendMessage(data);
                 }
             } catch (e) {
@@ -380,6 +408,7 @@
         };
 
         ws.onclose = () => {
+            hideTypingIndicator();
             connectionDot.classList.add("disconnected");
             roomStatus.textContent = "disconnected. reconnecting...";
             setTimeout(connect, 3000);
@@ -394,8 +423,9 @@
         const text = messageInput.value.trim();
         if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+        const currentSender = getSenderName();
         const payload = {
-            sender_name: getSenderName(),
+            sender_name: currentSender,
             text: text
         };
 
@@ -403,6 +433,7 @@
         messageInput.value = "";
         messageInput.focus();
     }
+
 
     sendButton.addEventListener("click", sendMessage);
     messageInput.addEventListener("keydown", (e) => {

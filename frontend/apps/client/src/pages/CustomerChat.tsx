@@ -99,14 +99,40 @@ export function CustomerChat() {
             setHasEscalated(true);
           }
         } else if (data.type === 'message') {
-          setIsWaitingForAssistant(false);
+          const isCustomer =
+            data.sender_name?.toLowerCase() === 'you' ||
+            data.sender_name?.toLowerCase() === 'customer' ||
+            data.sender_name === customerNameRef.current;
+
           setMessages((prev) => {
-            // Avoid duplicate appends if message already exists with same id
+            // Avoid duplicate appends if message already exists with same real server ID
             if (data.id && prev.some((m) => m.id === data.id)) {
               return prev;
             }
+
+            // If this is the server confirmation of the user's optimistic message,
+            // reconcile by replacing the temporary message with the confirmed server message
+            if (isCustomer) {
+              const tempIndex = prev.findIndex(
+                (m) => m.id?.startsWith('temp-') && m.text.trim() === data.text.trim()
+              );
+              if (tempIndex !== -1) {
+                const updated = [...prev];
+                updated[tempIndex] = data;
+                return updated;
+              }
+            }
+
             return [...prev, data];
           });
+
+          // If the message is from the assistant, hide the thinking indicator
+          if (!isCustomer) {
+            setIsWaitingForAssistant(false);
+          } else {
+            // User message confirmed; assistant is currently generating response
+            setIsWaitingForAssistant(true);
+          }
 
           if (
             data.text.includes('especialista') ||
@@ -150,15 +176,35 @@ export function CustomerChat() {
       return;
     }
 
-    const payload = {
+    const currentSender = customerNameRef.current || 'Customer';
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    const optimisticMessage: ChatMessage = {
+      id: tempId,
+      room_id: customerId,
+      sender_name: currentSender,
       text,
-      sender_name: customerNameRef.current || 'Customer',
+      type: 'message',
+      timestamp: new Date().toISOString(),
     };
 
-    socketRef.current.send(JSON.stringify(payload));
+    // 1. Inmediately display user message for immediate visual feedback
+    setMessages((prev) => [...prev, optimisticMessage]);
+
+    // 2. Clear the input immediately
     setInputMessage('');
+
+    // 3. Inmediately show the LLM thinking/writing indicator
     setIsWaitingForAssistant(true);
+
+    // 4. Transmit payload over WebSocket
+    const payload = {
+      text,
+      sender_name: currentSender,
+    };
+    socketRef.current.send(JSON.stringify(payload));
   };
+
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -413,22 +459,29 @@ export function CustomerChat() {
             })
           )}
 
-          {/* Assistant Typing Indicator */}
+          {/* Assistant Thinking / Writing Indicator */}
           {isWaitingForAssistant && (
-            <div className="flex flex-col items-start animate-in fade-in">
+            <div className="flex flex-col items-start animate-in fade-in slide-in-from-bottom-2 duration-200">
               <div className="flex items-center gap-1.5 mb-1 px-1 text-xs">
                 <div className="h-4 w-4 rounded-full bg-primary/10 flex items-center justify-center text-primary">
                   <Bot className="h-3 w-3" />
                 </div>
                 <span className="font-medium text-primary">Payment Assistant</span>
               </div>
-              <div className="bg-card border text-card-foreground rounded-2xl rounded-tl-xs px-4 py-2.5 shadow-2xs flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
-                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
-                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
-                <span className="text-xs text-muted-foreground ml-2">
-                  {isSpanish ? 'Escribiendo respuesta...' : 'Thinking...'}
-                </span>
+              <div className="bg-card border text-card-foreground rounded-2xl rounded-tl-xs px-4 py-3 shadow-xs flex items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" />
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground border-l pl-3">
+                  <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse shrink-0" />
+                  <span>
+                    {isSpanish
+                      ? 'El asistente con IA está analizando tu mensaje y redactando una respuesta...'
+                      : 'AI Assistant is thinking and drafting a response...'}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -464,7 +517,11 @@ export function CustomerChat() {
           <div className="flex items-center gap-2">
             <Input
               placeholder={
-                isSpanish
+                isWaitingForAssistant
+                  ? isSpanish
+                    ? 'El asistente está redactando una respuesta...'
+                    : 'Assistant is drafting a response...'
+                  : isSpanish
                   ? 'Escribe tu respuesta a la entidad bancaria...'
                   : 'Type your response to the bank assistant...'
               }
@@ -474,6 +531,7 @@ export function CustomerChat() {
               disabled={!isConnected}
               className="h-11 bg-background text-sm rounded-xl px-4"
             />
+
             <Button
               onClick={() => handleSendMessage()}
               disabled={!inputMessage.trim() || !isConnected}
