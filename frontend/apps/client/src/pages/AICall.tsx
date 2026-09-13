@@ -41,8 +41,10 @@ import {
   Captions,
   ExternalLink,
   Square,
+  MessageSquare,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
+import { getChannelPreference } from '@/lib/channel-preference';
 
 type AgentStatus = 'idle' | 'dialing' | 'in-call' | 'escalated' | 'ended';
 
@@ -73,7 +75,7 @@ let turnSeq = 0;
  *   4. On distress (text or sustained vocal), the loop stops and hands off.
  */
 export function AICall() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: customers } = useCustomers({ limit: 200 });
@@ -466,14 +468,71 @@ export function AICall() {
                   <SelectValue placeholder={t('aiCall.selectPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {customers?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.full_name}
-                    </SelectItem>
-                  ))}
+                  {customers?.map((c) => {
+                    const pref = getChannelPreference(c, i18n.language);
+                    const isCall = pref.channel === 'call';
+                    return (
+                      <SelectItem key={c.id} value={c.id}>
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span className="font-medium truncate">{c.full_name}</span>
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${
+                              isCall
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800'
+                            }`}
+                          >
+                            {isCall ? <Phone className="h-2.5 w-2.5" /> : <MessageSquare className="h-2.5 w-2.5" />}
+                            {pref.tag}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
+
+            {selectedCustomer && !inSession && (() => {
+              const pref = getChannelPreference(selectedCustomer, i18n.language);
+              const isCall = pref.channel === 'call';
+              return (
+                <div
+                  className={`rounded-lg border p-3 text-xs flex items-start gap-2.5 ${
+                    isCall
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-200'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-200'
+                  }`}
+                >
+                  {isCall ? (
+                    <Phone className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <MessageSquare className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <span>{t('channels.preference')}:</span>
+                      <Badge
+                        variant={isCall ? 'default' : 'secondary'}
+                        className={`text-[10px] py-0 px-1.5 ${
+                          isCall
+                            ? 'bg-emerald-600 hover:bg-emerald-600 text-white'
+                            : 'bg-amber-100 hover:bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                        }`}
+                      >
+                        {pref.label}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{pref.reason}</p>
+                    {!isCall && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300/80 font-medium">
+                        {t('channels.advisoryCall')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {customerId && !inSession && (
               <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">

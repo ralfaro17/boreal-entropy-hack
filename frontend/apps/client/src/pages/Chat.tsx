@@ -56,7 +56,9 @@ import {
   Calendar,
   Clock,
   ShieldCheck,
+  Phone,
 } from 'lucide-react';
+import { getChannelPreference } from '@/lib/channel-preference';
 
 export function Chat() {
   const { t, i18n } = useTranslation();
@@ -361,75 +363,143 @@ export function Chat() {
                     <SelectValue placeholder={t('chat.selectCustomer')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {candidates.map((cand) => (
-                      <SelectItem key={cand.customer_id} value={cand.customer_id}>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{cand.customer_name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            (${cand.amount_due.toFixed(2)})
-                          </span>
-                          {cand.is_overdue && (
-                            <Badge variant="destructive" className="text-[10px] py-0 px-1.5">
-                              Overdue
-                            </Badge>
-                          )}
-                          {cand.hardship_flag && (
-                            <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-destructive text-destructive">
-                              Hardship
-                            </Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {candidates.map((cand) => {
+                      const pref = getChannelPreference(
+                        {
+                          id: cand.customer_id,
+                          full_name: cand.customer_name,
+                          email: cand.customer_email,
+                        },
+                        i18n.language
+                      );
+                      const isChat = pref.channel === 'chat';
+                      return (
+                        <SelectItem key={cand.customer_id} value={cand.customer_id}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{cand.customer_name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              (${cand.amount_due.toFixed(2)})
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${
+                                isChat
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                              }`}
+                            >
+                              {isChat ? <MessageSquare className="h-2.5 w-2.5" /> : <Phone className="h-2.5 w-2.5" />}
+                              {pref.tag}
+                            </span>
+                            {cand.is_overdue && (
+                              <Badge variant="destructive" className="text-[10px] py-0 px-1.5">
+                                Overdue
+                              </Badge>
+                            )}
+                            {cand.hardship_flag && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-destructive text-destructive">
+                                Hardship
+                              </Badge>
+                            )}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               )}
             </div>
 
             {/* Selected Candidate Details Card */}
-            {selectedCandidate && (
-              <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2.5 text-xs">
-                <div className="flex items-center justify-between font-medium">
-                  <span>{selectedCandidate.customer_name}</span>
-                  <span className="text-muted-foreground">{selectedCandidate.customer_email}</span>
+            {selectedCandidate && (() => {
+              const pref = getChannelPreference(
+                {
+                  id: selectedCandidate.customer_id,
+                  full_name: selectedCandidate.customer_name,
+                  email: selectedCandidate.customer_email,
+                },
+                i18n.language
+              );
+              const isChat = pref.channel === 'chat';
+              return (
+                <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between font-medium">
+                    <div className="flex items-center gap-2">
+                      <span>{selectedCandidate.customer_name}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border ${
+                          isChat
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                        }`}
+                      >
+                        {isChat ? <MessageSquare className="h-2.5 w-2.5" /> : <Phone className="h-2.5 w-2.5" />}
+                        {pref.label}
+                      </span>
+                    </div>
+                    <span className="text-muted-foreground">{selectedCandidate.customer_email}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <CreditCard className="h-3.5 w-3.5" />
+                      <span>{t('chat.nextInstallment')}:</span>
+                      <strong className="text-foreground font-semibold">
+                        ${selectedCandidate.amount_due.toFixed(2)}
+                      </strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Calendar className="h-3.5 w-3.5" />
+                      <span>{t('chat.dueDate')}:</span>
+                      <strong className={`font-semibold ${selectedCandidate.is_overdue ? 'text-destructive' : 'text-foreground'}`}>
+                        {selectedCandidate.due_date} ({selectedCandidate.days_until_due < 0 ? `${Math.abs(selectedCandidate.days_until_due)}d late` : `${selectedCandidate.days_until_due}d left`})
+                      </strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>{t('chat.streak')}:</span>
+                      <strong className="text-foreground font-semibold">
+                        {selectedCandidate.missed_payment_streak} missed
+                      </strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <span>{t('chat.hardship')}:</span>
+                      <strong className={selectedCandidate.hardship_flag ? 'text-destructive font-semibold' : 'text-foreground'}>
+                        {selectedCandidate.hardship_flag ? 'Yes' : 'No'}
+                      </strong>
+                    </div>
+                  </div>
+                  <div
+                    className={`rounded border p-2 text-xs flex items-start gap-2 ${
+                      isChat
+                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-950 dark:text-blue-300'
+                        : 'bg-amber-500/10 border-amber-500/20 text-amber-950 dark:text-amber-300'
+                    }`}
+                  >
+                    {isChat ? (
+                      <MessageSquare className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                    ) : (
+                      <Phone className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                    )}
+                    <div className="space-y-0.5">
+                      <div className="font-medium flex items-center gap-1">
+                        <span>{t('channels.preference')}:</span>
+                        <span>{pref.reason}</span>
+                      </div>
+                      {!isChat && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300/80 font-medium">
+                          {t('channels.advisoryChat')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {selectedCandidate.last_reminder_at && (
+                    <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+                      Last reminder: {formatDate(selectedCandidate.last_reminder_at)}
+                    </p>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/60">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <CreditCard className="h-3.5 w-3.5" />
-                    <span>{t('chat.nextInstallment')}:</span>
-                    <strong className="text-foreground font-semibold">
-                      ${selectedCandidate.amount_due.toFixed(2)}
-                    </strong>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Calendar className="h-3.5 w-3.5" />
-                    <span>{t('chat.dueDate')}:</span>
-                    <strong className={`font-semibold ${selectedCandidate.is_overdue ? 'text-destructive' : 'text-foreground'}`}>
-                      {selectedCandidate.due_date} ({selectedCandidate.days_until_due < 0 ? `${Math.abs(selectedCandidate.days_until_due)}d late` : `${selectedCandidate.days_until_due}d left`})
-                    </strong>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>{t('chat.streak')}:</span>
-                    <strong className="text-foreground font-semibold">
-                      {selectedCandidate.missed_payment_streak} missed
-                    </strong>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    <span>{t('chat.hardship')}:</span>
-                    <strong className={selectedCandidate.hardship_flag ? 'text-destructive font-semibold' : 'text-foreground'}>
-                      {selectedCandidate.hardship_flag ? 'Yes' : 'No'}
-                    </strong>
-                  </div>
-                </div>
-                {selectedCandidate.last_reminder_at && (
-                  <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
-                    Last reminder: {formatDate(selectedCandidate.last_reminder_at)}
-                  </p>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             {/* Custom Message Field */}
             <div className="space-y-1.5">

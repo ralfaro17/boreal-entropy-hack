@@ -280,5 +280,15 @@
     "atm": "ATM",
     "call_center": "Call Center",
     "web": "Web"
+  },
+  "channels": {
+    "preference": "Contact Preference",
+    "prefersChat": "Prefers Chat",
+    "prefersCall": "Prefers Call",
+    "chatTag": "Chat",
+    "callTag": "Call",
+    "optimalChannel": "Optimal Channel",
+    "advisoryCall": "Customer typically prefers Chat; phone calls are still supported.",
+    "advisoryChat": "Customer typically prefers Phone Calls; consider reaching out via Voice Call."
   }
 }

@@ -278,7 +278,17 @@
     "app": "App",
     "branch": "Sucursal",
     "atm": "Cajero",
-    "call_center": "Call Center",
+    "call_center": "Centro de Llamadas",
     "web": "Web"
+  },
+  "channels": {
+    "preference": "Preferencia de Contacto",
+    "prefersChat": "Prefiere Chat",
+    "prefersCall": "Prefiere Llamada",
+    "chatTag": "Chat",
+    "callTag": "Llamada",
+    "optimalChannel": "Canal Óptimo",
+    "advisoryCall": "El cliente suele preferir Chat; las llamadas siguen disponibles.",
+    "advisoryChat": "El cliente suele preferir Llamada Telefónica; considera contactarlo por Llamada IA."
   }
 }
