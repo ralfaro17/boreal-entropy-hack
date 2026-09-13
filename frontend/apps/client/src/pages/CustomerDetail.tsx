@@ -162,6 +162,14 @@ export function CustomerDetail() {
         <Button variant="ghost" size="icon" onClick={() => navigate('/customers')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-primary to-chart-2 text-primary-foreground text-base font-bold shadow-md shadow-primary/25">
+          {customer.full_name
+            .split(' ')
+            .map((n) => n[0])
+            .slice(0, 2)
+            .join('')
+            .toUpperCase()}
+        </div>
         <div className="flex-1">
           <PageHeader
             title={customer.full_name}
@@ -177,42 +185,71 @@ export function CustomerDetail() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="relative overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+          <div className="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary/60 to-primary" />
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">{t('customers.creditScore')}</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t('customers.creditScore')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{customer.credit_score ?? 'N/A'}</div>
+            <div
+              className={`text-3xl font-bold tracking-tight ${
+                customer.credit_score == null
+                  ? 'text-muted-foreground'
+                  : customer.credit_score >= 740
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : customer.credit_score >= 620
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-destructive'
+              }`}
+            >
+              {customer.credit_score ?? 'N/A'}
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="relative overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+          <div className="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-chart-2/60 to-chart-2" />
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">{t('customers.region')}</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t('customers.region')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{customer.region ?? 'N/A'}</div>
+            <div className="text-3xl font-bold tracking-tight">{customer.region ?? 'N/A'}</div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="relative overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+          <div className="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-chart-3/60 to-chart-3" />
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">{t('customers.employmentStatus')}</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t('customers.employmentStatus')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Badge variant="outline">
+            <Badge variant="outline" className="text-sm px-3 py-1">
               {customer.employment_status ? t(`employment.${customer.employment_status}`) : 'N/A'}
             </Badge>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="relative overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+          <div
+            className={`absolute inset-x-0 top-0 h-1 bg-linear-to-r ${
+              latestRisk?.early_warning_flag
+                ? 'from-destructive/60 to-destructive'
+                : 'from-emerald-500/60 to-emerald-500'
+            }`}
+          />
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">{t('detail.earlyWarning')}</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t('detail.earlyWarning')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Badge variant={latestRisk?.early_warning_flag ? 'destructive' : 'default'}>
-              {latestRisk?.early_warning_flag ? t('detail.earlyWarning') : t('detail.earlyWarning')}
+            <Badge
+              variant={latestRisk?.early_warning_flag ? 'destructive' : 'secondary'}
+              className={
+                latestRisk?.early_warning_flag
+                  ? 'text-sm px-3 py-1'
+                  : 'text-sm px-3 py-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-transparent'
+              }
+            >
+              {latestRisk?.early_warning_flag ? 'Alert' : 'OK'}
             </Badge>
           </CardContent>
         </Card>

@@ -33,7 +33,6 @@ import {
   Bot,
   User,
 } from 'lucide-react';
-
 export function Chat() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -75,10 +74,13 @@ export function Chat() {
         description={t('chat.description')}
       />
 
-      <Card className="w-full">
-        <CardHeader className="pb-3">
+      <Card className="w-full overflow-hidden">
+        <CardHeader className="pb-3 border-b bg-muted/30">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <MessageSquare className="h-4 w-4" />
+              </div>
               <CardTitle className="text-base font-semibold">
                 {t('chat.conversations')}
               </CardTitle>
@@ -88,13 +90,13 @@ export function Chat() {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
+            <div className="relative w-full sm:max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder={t('chat.search')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="max-w-sm h-9"
+                className="pl-9 h-9 bg-background"
               />
             </div>
           </div>
@@ -102,14 +104,14 @@ export function Chat() {
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>{t('chat.customer')}</TableHead>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="pl-6">{t('chat.customer')}</TableHead>
                 <TableHead>{t('chat.channel')}</TableHead>
                 <TableHead>{t('chat.status')}</TableHead>
                 <TableHead>{t('chat.lastMessage')}</TableHead>
                 <TableHead>{t('chat.messages')}</TableHead>
                 <TableHead>{t('chat.lastActive')}</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="text-right pr-6">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -138,10 +140,15 @@ export function Chat() {
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={() => setSelectedConversation(convo)}
                   >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 rounded-full bg-primary/10 text-primary">
-                          <MessageSquare className="h-4 w-4" />
+                    <TableCell className="pl-6">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                          {convo.customer_name
+                            .split(' ')
+                            .map((n) => n[0])
+                            .slice(0, 2)
+                            .join('')
+                            .toUpperCase()}
                         </div>
                         <div>
                           <p className="font-medium text-sm leading-none">
@@ -171,7 +178,7 @@ export function Chat() {
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-[280px]">
+                    <TableCell className="max-w-70">
                       <p className="text-xs text-muted-foreground truncate">
                         {convo.last_message || 'No messages yet'}
                       </p>
@@ -184,7 +191,7 @@ export function Chat() {
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatDate(convo.last_message_at)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right pr-6">
                       <Button
                         variant="outline"
                         size="sm"
@@ -233,7 +240,7 @@ export function Chat() {
           </DialogHeader>
 
           {/* Message History */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[300px] max-h-[55vh]">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-75 max-h-[55vh]">
             {loadingMessages ? (
               <div className="space-y-3">
                 <Skeleton className="h-16 w-3/4" />
@@ -270,10 +277,10 @@ export function Chat() {
                       )}
                     </div>
                     <div
-                      className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
+                      className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
                         isUser
-                          ? 'bg-primary text-primary-foreground rounded-tr-none'
-                          : 'bg-muted text-foreground rounded-tl-none'
+                          ? 'bg-linear-to-br from-primary to-chart-2 text-primary-foreground rounded-tr-sm'
+                          : 'bg-muted text-foreground rounded-tl-sm border'
                       }`}
                     >
                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>

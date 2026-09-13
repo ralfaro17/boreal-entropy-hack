@@ -3,7 +3,8 @@ import { usePayments } from '@/hooks/usePayments';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useTranslation } from 'react-i18next';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Filter, Inbox } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/page-header';
@@ -46,11 +47,12 @@ export function Payments() {
         description={t('payments.description')}
       />
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-4 mb-4">
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? 'all')}>
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="w-44 bg-background">
                 <SelectValue placeholder={t('payments.allStatus')} />
               </SelectTrigger>
               <SelectContent>
@@ -62,18 +64,24 @@ export function Payments() {
                 ))}
               </SelectContent>
             </Select>
+            {filteredPayments && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {filteredPayments.length} {t('payments.title').toLowerCase()}
+              </span>
+            )}
           </div>
-
+        </CardHeader>
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>{t('payments.customer')}</TableHead>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="pl-6">{t('payments.customer')}</TableHead>
                 <TableHead>{t('detail.dueDate')}</TableHead>
                 <TableHead>{t('detail.amountDue')}</TableHead>
                 <TableHead>{t('detail.amountPaid')}</TableHead>
                 <TableHead>{t('detail.status')}</TableHead>
                 <TableHead>{t('detail.daysLate')}</TableHead>
-                <TableHead>{t('detail.paymentMethod')}</TableHead>
+                <TableHead className="pr-6">{t('detail.paymentMethod')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -87,19 +95,30 @@ export function Payments() {
                 ))
               ) : !filteredPayments?.length ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    {t('common.noData')}
+                  <TableCell colSpan={7} className="h-40 text-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                        <Inbox className="h-6 w-6" />
+                      </div>
+                      <p className="text-sm">{t('common.noData')}</p>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredPayments.map((payment) => (
                   <TableRow key={payment.id}>
-                    <TableCell className="font-medium">
+                    <TableCell className="pl-6 font-medium">
                       {accountToCustomer.get(payment.account_id) ?? 'N/A'}
                     </TableCell>
-                    <TableCell>{new Date(payment.due_date).toLocaleDateString()}</TableCell>
-                    <TableCell>${payment.amount_due.toLocaleString()}</TableCell>
-                    <TableCell>{payment.amount_paid != null ? `$${payment.amount_paid.toLocaleString()}` : '-'}</TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {new Date(payment.due_date).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="font-semibold tabular-nums">
+                      ${payment.amount_due.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">
+                      {payment.amount_paid != null ? `$${payment.amount_paid.toLocaleString()}` : '—'}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant={
@@ -109,12 +128,25 @@ export function Payments() {
                             ? 'destructive'
                             : 'secondary'
                         }
+                        className={
+                          payment.status === 'on_time'
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-transparent hover:bg-emerald-500/20'
+                            : undefined
+                        }
                       >
                         {t(`paymentStatus.${payment.status}`)}
                       </Badge>
                     </TableCell>
-                    <TableCell>{payment.days_late > 0 ? payment.days_late : '-'}</TableCell>
-                    <TableCell>{payment.payment_method ? t(`paymentMethod.${payment.payment_method}`) : '-'}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {payment.days_late > 0 ? (
+                        <span className="text-destructive font-medium">{payment.days_late}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="pr-6 text-muted-foreground">
+                      {payment.payment_method ? t(`paymentMethod.${payment.payment_method}`) : '—'}
+                    </TableCell>
                   </TableRow>
                 ))
               )}

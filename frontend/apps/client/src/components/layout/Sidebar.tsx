@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router';
-import { LayoutDashboard, Users, CreditCard, MessageSquare, Moon, Sun, Menu, Globe } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, MessageSquare, Moon, Sun, Menu, Globe, Snowflake } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -32,6 +32,9 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="space-y-1 p-4">
+      <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+        Menu
+      </p>
       {navItems.map(({ to, icon: Icon, label }) => (
         <NavLink
           key={to}
@@ -40,18 +43,38 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200',
               isActive
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-primary/10 text-primary shadow-none before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-5 before:w-1 before:rounded-full before:bg-primary'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground hover:translate-x-0.5'
             )
           }
         >
-          <Icon className="h-4 w-4" />
+          <Icon className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
           {label}
         </NavLink>
       ))}
     </nav>
+  );
+}
+
+function Brand({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-primary to-chart-2 text-primary-foreground shadow-md shadow-primary/25">
+        <Snowflake className="h-4.5 w-4.5" />
+      </div>
+      <div className="leading-tight">
+        <span className={cn('font-bold tracking-tight', compact ? 'text-base' : 'text-[15px]')}>
+          Boreal <span className="text-primary">Entropy</span>
+        </span>
+        {!compact && (
+          <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+            Risk Console
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -80,7 +103,7 @@ function LanguageSwitcher() {
       value={i18n.language}
       onValueChange={(val) => i18n.changeLanguage(val ?? undefined)}
     >
-      <SelectTrigger className="w-[100px] h-8 text-xs">
+      <SelectTrigger className="w-25 h-8 text-xs">
         <Globe className="h-3 w-3 mr-1" />
         <SelectValue />
       </SelectTrigger>
@@ -97,19 +120,21 @@ export function Sidebar() {
 
   if (isMobile) {
     return (
-      <div className="flex items-center justify-between border-b px-4 h-14">
+      <div className="flex items-center justify-between border-b bg-sidebar/80 backdrop-blur-md px-4 h-14 sticky top-0 z-40">
         <Sheet>
           <SheetTrigger render={<Button variant="ghost" size="icon" />}>
             <Menu className="h-5 w-5" />
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
-            <SheetHeader className="border-b px-6 py-4">
-              <SheetTitle className="text-xl font-bold">Boreal Entropy</SheetTitle>
+            <SheetHeader className="border-b px-4 py-4">
+              <SheetTitle>
+                <Brand compact />
+              </SheetTitle>
             </SheetHeader>
             <NavLinks />
           </SheetContent>
         </Sheet>
-        <span className="text-lg font-bold">Boreal Entropy</span>
+        <Brand compact />
         <div className="flex items-center gap-1">
           <LanguageSwitcher />
           <ThemeToggle />
@@ -119,15 +144,17 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-64 border-r bg-muted/40 flex flex-col">
-      <div className="flex h-16 items-center justify-between border-b px-6">
-        <span className="text-xl font-bold">Boreal Entropy</span>
-        <div className="flex items-center gap-1">
-          <LanguageSwitcher />
-          <ThemeToggle />
-        </div>
+    <aside className="w-64 border-r bg-sidebar flex flex-col">
+      <div className="flex h-16 items-center border-b px-4">
+        <Brand />
       </div>
-      <NavLinks />
+      <div className="flex-1">
+        <NavLinks />
+      </div>
+      <div className="border-t p-4 flex items-center justify-between gap-2">
+        <LanguageSwitcher />
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

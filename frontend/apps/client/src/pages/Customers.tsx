@@ -18,7 +18,7 @@ import { PageHeader } from '@/components/page-header';
 import { CustomerForm } from '@/components/customer-form';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Plus, Search, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Trash2, Eye, Users } from 'lucide-react';
 import { showSuccessToast, showErrorToast } from '@/lib/toast-utils';
 import type { Customer } from '@/lib/api';
 
@@ -71,6 +71,21 @@ export function Customers() {
     return <Badge variant={variants[status] ?? 'outline'}>{t(`employment.${status}`)}</Badge>;
   };
 
+  const getInitials = (name: string) =>
+    name
+      .split(' ')
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase();
+
+  const getCreditScoreColor = (score: number | null | undefined) => {
+    if (score == null) return 'text-muted-foreground';
+    if (score >= 740) return 'text-emerald-600 dark:text-emerald-400';
+    if (score >= 620) return 'text-amber-600 dark:text-amber-400';
+    return 'text-destructive';
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -84,28 +99,28 @@ export function Customers() {
         }
       />
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Search className="h-4 w-4 text-muted-foreground" />
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b bg-muted/30">
+          <div className="relative max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder={t('customers.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
+              className="pl-9 bg-background"
             />
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>{t('customers.name')}</TableHead>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="pl-6">{t('customers.name')}</TableHead>
                 <TableHead>{t('customers.email')}</TableHead>
                 <TableHead>{t('customers.region')}</TableHead>
                 <TableHead>{t('customers.employmentStatus')}</TableHead>
                 <TableHead>{t('customers.creditScore')}</TableHead>
-                <TableHead>{t('common.actions')}</TableHead>
+                <TableHead className="text-right pr-6">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -121,31 +136,58 @@ export function Customers() {
                 ))
               ) : filteredCustomers?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    {t('customers.noResults')}
+                  <TableCell colSpan={6} className="h-40 text-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                        <Users className="h-6 w-6" />
+                      </div>
+                      <p className="text-sm">{t('customers.noResults')}</p>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredCustomers?.map((customer) => (
-                  <TableRow key={customer.id}>
-                    <TableCell className="font-medium">{customer.full_name}</TableCell>
-                    <TableCell>{customer.email}</TableCell>
-                    <TableCell>{customer.region ?? 'N/A'}</TableCell>
+                  <TableRow
+                    key={customer.id}
+                    className="cursor-pointer group"
+                    onClick={() => navigate(`/customers/${customer.id}`)}
+                  >
+                    <TableCell className="pl-6">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                          {getInitials(customer.full_name)}
+                        </div>
+                        <span className="font-medium">{customer.full_name}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{customer.email}</TableCell>
+                    <TableCell>{customer.region ?? <span className="text-muted-foreground">N/A</span>}</TableCell>
                     <TableCell>{getEmploymentBadge(customer.employment_status)}</TableCell>
-                    <TableCell>{customer.credit_score ?? 'N/A'}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
+                      <span className={`font-semibold tabular-nums ${getCreditScoreColor(customer.credit_score)}`}>
+                        {customer.credit_score ?? 'N/A'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right pr-6">
+                      <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => navigate(`/customers/${customer.id}`)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/customers/${customer.id}`);
+                          }}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => setDeleteTarget(customer)}
+                          className="hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget(customer);
+                          }}
                           disabled={deleteCustomer.isPending}
                         >
                           <Trash2 className="h-4 w-4" />

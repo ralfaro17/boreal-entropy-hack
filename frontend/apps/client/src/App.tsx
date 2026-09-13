@@ -23,9 +23,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Toaster />
       <BrowserRouter>
-        <div className="flex h-screen flex-col md:flex-row">
+        <div className="flex h-screen flex-col md:flex-row bg-background">
           <Sidebar />
-          <main className="flex-1 overflow-auto p-6">
+          <main className="flex-1 overflow-auto">
+            <div className="mx-auto max-w-7xl p-4 md:p-8">
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/customers" element={<Customers />} />
@@ -33,6 +34,7 @@ function App() {
               <Route path="/payments" element={<Payments />} />
               <Route path="/chat" element={<Chat />} />
             </Routes>
+            </div>
           </main>
         </div>
       </BrowserRouter>
