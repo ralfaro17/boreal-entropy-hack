@@ -64,6 +64,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """Create all database tables defined in the metadata."""
+    import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 

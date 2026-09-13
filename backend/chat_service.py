@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 app = FastAPI(title="Payment Reminder Chat")
 client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY from env
 
-MODEL = "claude-haiku-4-5-20251001"  # fast model: latency over raw capability here
+MODEL = "deepseek-v4-flash"  # fast model: latency over raw capability here
 MAX_HISTORY_MESSAGES = 10  # trimmed context window, keeps prompts small and fast
 
 

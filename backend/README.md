@@ -36,7 +36,23 @@ cd backend
 uv sync
 ```
 
-### 2. Start the Development Server
+### 2. Run Database Migrations & Seed Demo Personas
+Database schema and mock demo personas are managed with **Alembic**:
+```bash
+uv run alembic upgrade head
+```
+
+To re-seed or reset demo mock data at any time:
+```bash
+uv run python seed.py --reset
+```
+
+To recompute nightly risk features across all customers:
+```bash
+uv run python risk_job.py
+```
+
+### 3. Start the Development Server
 ```bash
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
