@@ -16,6 +16,11 @@ from datetime import date, datetime
 import models
 from anthropic import AsyncAnthropic
 from database import get_db, init_db
+from guardrails import (
+    customer_message_signals_distress,
+    get_escalation_reply,
+    output_violates_guardrails,
+)
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -36,6 +41,7 @@ def on_startup():
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None  # omit to start a new conversation
+    language: str = "es"  # "es" (default) or "en"
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +183,31 @@ async def load_history(db: Session, conversation_id: str) -> list[dict]:
 # 3. Prompt construction — tone and compliance rules baked in
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT_TEMPLATE = """You are a payment reminder assistant for a bank. Your job \
+SYSTEM_PROMPT_TEMPLATE_ES = """Eres un asistente de recordatorio y asesoría de pagos para un banco. Tu labor \
+es ayudar a {name} a mantenerse al día con su pago próximo o vencido mediante una conversación de chat \
+breve, empática, cálida y sin juzgar — jamás a través de la presión ni la intimidación.
+
+Contexto del cliente:
+- Monto adeudado: {amount_due}
+- Fecha de vencimiento: {due_date} ({days_until_due} días desde hoy)
+- Racha de pagos no realizados: {missed_streak}
+- Alerta temprana de riesgo: {early_warning}
+- Indicador de dificultad económica: {hardship_flag}
+
+Reglas estrictas e inviolables:
+- Jamás amenaces con demandas, juicios, abogados o acciones legales.
+- Jamás amenaces con dañar el buró de crédito, manchar historial o listas negras.
+- Jamás amenaces con embargos, retención de sueldo o cobradores.
+- Jamás avergüences al cliente ni le recrimines su situación personal.
+- Jamás prometas descuentos o condonaciones específicas no autorizadas. Ofrece canalizarlo con un especialista.
+- Finaliza siempre con un siguiente paso concreto y sencillo (pagar ahora, reprogramar o hablar con un asesor).
+- Si hardship_flag es verdadero, no repitas la exigencia de pago; prioriza ofrecer alternativas flexibles y apoyo humano.
+- Si el cliente expresa dificultades económicas o desempleo, prioriza ofrecer ayuda y transferencia a un asesor.
+- Mensajes breves (menos de 80 palabras). Sin tecnicismos corporativos ni signos de exclamación excesivos.
+- Utiliza el historial para dar continuidad natural a la conversación.
+"""
+
+SYSTEM_PROMPT_TEMPLATE_EN = """You are a payment reminder assistant for a bank. Your job \
 is to help {name} stay on top of an upcoming or overdue payment through a short, \
 warm, non-judgmental chat conversation — never through pressure.
 
@@ -189,7 +219,7 @@ Customer context:
 - Hardship flag on file: {hardship_flag}
 
 Hard rules, never break these:
-- Never threaten legal action, credit damage, or collections agencies.
+- Never threaten legal action, wage garnishment, asset seizure, or credit damage.
 - Never shame the customer or imply they are irresponsible.
 - Never promise a specific fee waiver, interest change, or discount — you are not \
 authorized to make financial commitments. Offer to connect them with a specialist instead.
@@ -203,54 +233,14 @@ selling the payment and prioritize offering help and a human handoff.
 """
 
 
-def build_system_prompt(ctx: dict) -> str:
-    return SYSTEM_PROMPT_TEMPLATE.format(**ctx)
+def build_system_prompt(ctx: dict, language: str = "es") -> str:
+    template = SYSTEM_PROMPT_TEMPLATE_ES if language == "es" else SYSTEM_PROMPT_TEMPLATE_EN
+    return template.format(**ctx)
 
 
 # ---------------------------------------------------------------------------
-# 4. Guardrails — programmatic, run regardless of what the prompt says
+# 4. Endpoint — streamed response, escalation on distress, full persistence
 # ---------------------------------------------------------------------------
-
-BANNED_OUTPUT_PATTERNS = [
-    r"\blegal action\b",
-    r"\bcredit (score|report) (will|may) (be )?(damage|hurt|suffer)",
-    r"\bcollections? agency\b",
-    r"\bwe (will|are going to) sue\b",
-    r"\bgarnish",
-    r"\bguarantee(d)? (a |the )?(discount|waiver|reduction)\b",
-]
-
-DISTRESS_SIGNALS = [
-    r"\blost my job\b",
-    r"\bcan'?t afford\b",
-    r"\bno money\b",
-    r"\bfinancial (hardship|trouble|difficult)",
-    r"\bevict",
-]
-
-
-def output_violates_guardrails(text: str) -> str | None:
-    lowered = text.lower()
-    for pattern in BANNED_OUTPUT_PATTERNS:
-        if re.search(pattern, lowered):
-            return pattern
-    return None
-
-
-def customer_message_signals_distress(text: str) -> bool:
-    lowered = text.lower()
-    return any(re.search(p, lowered) for p in DISTRESS_SIGNALS)
-
-
-# ---------------------------------------------------------------------------
-# 5. Endpoint — streamed response, escalation on distress, full persistence
-# ---------------------------------------------------------------------------
-
-ESCALATION_REPLY = (
-    "I hear you, and I want to make sure you get real help with this — "
-    "connecting you with someone on our team now."
-)
-
 
 @app.post("/chat/{customer_id}")
 async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get_db)):
@@ -264,12 +254,13 @@ async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get
 
     if customer_message_signals_distress(payload.message):
         await asyncio.to_thread(_sync_mark_escalated, db, convo.id)
+        escalation_reply = get_escalation_reply(payload.language)
         await asyncio.to_thread(
-            _sync_add_message, db, convo.id, models.MessageRole.ASSISTANT, ESCALATION_REPLY
+            _sync_add_message, db, convo.id, models.MessageRole.ASSISTANT, escalation_reply
         )
 
         async def escalation_stream():
-            yield ESCALATION_REPLY
+            yield escalation_reply
 
         return StreamingResponse(
             escalation_stream(),
@@ -278,7 +269,7 @@ async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get
         )
 
     ctx = await gather_context(db, customer_id)
-    system_prompt = build_system_prompt(ctx)
+    system_prompt = build_system_prompt(ctx, payload.language)
     history = await load_history(db, convo.id)  # includes the message just saved
 
     async def token_stream():
@@ -297,9 +288,12 @@ async def chat(customer_id: str, payload: ChatRequest, db: Session = Depends(get
         violation = output_violates_guardrails(full_text)
         flagged = violation is not None
         if flagged:
-            # In production: alert a human reviewer instead of just appending
-            # a note — don't let a flagged reply stand as the final word.
-            yield "\n\n[This message was flagged for review and will be followed up on by a team member.]"
+            flag_note = (
+                "\n\n[Este mensaje fue marcado para revisión regulatoria y será atendido por un especialista.]"
+                if payload.language == "es"
+                else "\n\n[This message was flagged for compliance review and will be followed up on by a team member.]"
+            )
+            yield flag_note
 
         await asyncio.to_thread(
             _sync_add_message,

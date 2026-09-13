@@ -10,6 +10,14 @@ import schemas
 from anthropic import AsyncAnthropic
 from chat import chat_manager
 from database import SessionLocal, check_db_connection, get_db, init_db
+from guardrails import (
+    check_compliance_violations,
+    customer_message_signals_distress,
+    detect_customer_distress,
+    get_escalation_reply,
+    output_violates_guardrails,
+    validate_compliance_or_raise,
+)
 from fastapi import (
     Depends,
     FastAPI,
@@ -764,28 +772,6 @@ if os.getenv("ANTHROPIC_API_KEY"):
     except Exception:
         ai_client = None
 
-BANNED_OUTPUT_PATTERNS = [
-    r"\blegal action\b",
-    r"\bcredit (score|report) (will|may) (be )?(damage|hurt|suffer)",
-    r"\bcollections? agency\b",
-    r"\bwe (will|are going to) sue\b",
-    r"\bgarnish",
-    r"\bguarantee(d)? (a |the )?(discount|waiver|reduction)\b",
-    r"\bembargo\b",
-    r"\bdemanda\b",
-    r"\bagencia de cobranza\b",
-    r"\bdañar tu historial\b",
-]
-
-
-def output_violates_guardrails(text: str) -> str | None:
-    lowered = text.lower()
-    for pattern in BANNED_OUTPUT_PATTERNS:
-        if re.search(pattern, lowered):
-            return pattern
-    return None
-
-
 def get_or_create_active_conversation(db: Session, customer_id: str) -> models.Conversation:
     """Retrieve an ongoing conversation from the last 14 days, or create a new one."""
     cutoff = datetime.utcnow() - timedelta(days=14)
@@ -837,15 +823,31 @@ async def generate_risk_reminder(
 
     # Try LLM generation if client is available
     if ai_client:
-        sys_prompt = (
-            f"You are a payment reminder assistant for a bank. Write a short (under 50 words), "
-            f"warm, supportive, and non-judgmental chat message to {customer.full_name} in {'Spanish' if language == 'es' else 'English'}. "
-            f"Context: installment of ${amount_due:.2f} due on {due_date_str} ({days_desc}). "
-            f"Missed streak: {streak}. Hardship flag: {hardship}. "
-            f"Hard rules: Never threaten legal action or damage to credit score. "
-            f"Never shame the customer. Offer support, a flexible payment plan, or speaking with a specialist. "
-            f"If hardship is true, do not pressure for payment; prioritize offering help and human connection."
-        )
+        if language == "es":
+            sys_prompt = (
+                f"Eres un asistente bancario enfocado en la prevención proactiva del sobreendeudamiento. "
+                f"Escribe un mensaje breve (menos de 50 palabras), empático y sin juicio moral para {customer.full_name}. "
+                f"Contexto: cuota de ${amount_due:.2f} con vencimiento el {due_date_str} ({days_desc}). "
+                f"Historial: racha de {streak} pagos pendientes. Indicador de dificultad económica: {hardship}. "
+                f"Reglas estrictas e inviolables de cumplimiento: "
+                f"- Jamás amenaces con demandas, juicios, abogados de cobranza o acciones legales. "
+                f"- Jamás amenaces con afectar el buró de crédito, manchar historial o listas negras. "
+                f"- Jamás amenaces con embargos, retención de sueldo o visitas domiciliarias. "
+                f"- Jamás avergüences al cliente ni uses términos como moroso o mala paga. "
+                f"- No hagas promesas o garantías no autorizadas de quita o condonación. "
+                f"- Si el cliente presenta dificultades, prioriza ofrecer alternativas flexibles y apoyo humano."
+            )
+        else:
+            sys_prompt = (
+                f"You are a payment reminder assistant for a bank. Write a short (under 50 words), "
+                f"warm, supportive, and non-judgmental chat message to {customer.full_name} in English. "
+                f"Context: installment of ${amount_due:.2f} due on {due_date_str} ({days_desc}). "
+                f"Missed streak: {streak}. Hardship flag: {hardship}. "
+                f"Hard rules: Never threaten legal action, wage garnishment, asset seizure, or damage to credit score/credit bureaus. "
+                f"Never shame or insult the customer. Never promise unauthorized discounts or debt forgiveness. "
+                f"Offer support, a flexible payment plan, or speaking with a specialist. "
+                f"If hardship is true, do not pressure for payment; prioritize offering help and human connection."
+            )
         try:
             res = await ai_client.messages.create(
                 model="deepseek-chat",
@@ -1026,26 +1028,56 @@ async def websocket_chat_endpoint(
 
             cleaned_text = text.strip()
             if cleaned_text:
+                escalation_msg = None
                 if is_customer_room:
                     # Persist message to DB Conversation
                     db = SessionLocal()
                     try:
                         active_convo = get_or_create_active_conversation(db, room_id)
+                        is_customer_msg = (
+                            msg_sender.lower() in ("you", "user", "customer") or msg_sender == customer_name
+                        )
                         role = (
                             models.MessageRole.USER
-                            if msg_sender.lower() in ("you", "user", "customer") or msg_sender == customer_name
+                            if is_customer_msg
                             else models.MessageRole.ASSISTANT
                         )
+                        is_distressed = False
+                        if is_customer_msg:
+                            is_distressed, _ = detect_customer_distress(cleaned_text)
+
                         db_msg = models.Message(
                             conversation_id=active_convo.id,
                             role=role,
                             content=cleaned_text,
                             created_at=datetime.utcnow(),
-                            was_flagged=False,
+                            was_flagged=is_distressed,
                         )
                         db.add(db_msg)
+
+                        if is_distressed:
+                            active_convo.is_escalated = True
+
                         active_convo.last_message_at = datetime.utcnow()
                         db.commit()
+
+                        # If distress detected, trigger immediate empathetic handoff message
+                        if is_distressed:
+                            lang = "es"
+                            if re.search(r"\b(job|money|afford|hospital|evict|funeral|laid off)\b", cleaned_text.lower()):
+                                lang = "en"
+                            reply_text = get_escalation_reply(lang)
+                            asst_db_msg = models.Message(
+                                conversation_id=active_convo.id,
+                                role=models.MessageRole.ASSISTANT,
+                                content=reply_text,
+                                created_at=datetime.utcnow(),
+                                was_flagged=False,
+                            )
+                            db.add(asst_db_msg)
+                            active_convo.last_message_at = datetime.utcnow()
+                            db.commit()
+                            escalation_msg = reply_text
                     finally:
                         db.close()
 
@@ -1056,6 +1088,15 @@ async def websocket_chat_endpoint(
                     msg_type="message",
                 )
                 await chat_manager.broadcast(room_id, msg)
+
+                if escalation_msg:
+                    asst_ws_msg = chat_manager.format_message(
+                        room_id=room_id,
+                        sender_name="Payment Assistant",
+                        text=escalation_msg,
+                        msg_type="message",
+                    )
+                    await chat_manager.broadcast(room_id, asst_ws_msg)
     except WebSocketDisconnect:
         await chat_manager.disconnect(websocket, room_id)
 
@@ -1075,13 +1116,19 @@ def get_room_messages(room_id: str):
 @app.post("/chat/rooms/{room_id}/messages", status_code=status.HTTP_201_CREATED, tags=["Chat"])
 async def post_room_message(room_id: str, payload: schemas.ChatMessagePayload):
     """Inject a message into a chat room via REST (e.g. from an automated bot,
-
     debt prevention alert, or payment reminder) and broadcast to connected WebSockets.
     """
+    cleaned_text = payload.text.strip()
+    if payload.sender_name.lower() not in ("you", "user", "customer"):
+        try:
+            validate_compliance_or_raise(cleaned_text, context="Outgoing message")
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     msg = chat_manager.format_message(
         room_id=room_id,
         sender_name=payload.sender_name,
-        text=payload.text,
+        text=cleaned_text,
         msg_type="message",
     )
     await chat_manager.broadcast(room_id, msg)
@@ -1186,6 +1233,10 @@ async def send_risk_reminder(payload: schemas.SendRiskReminderPayload, db: Sessi
 
     if payload.custom_message and payload.custom_message.strip():
         reminder_text = payload.custom_message.strip()
+        try:
+            validate_compliance_or_raise(reminder_text, context="Custom reminder message")
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     else:
         reminder_text = await generate_risk_reminder(
             customer=customer,

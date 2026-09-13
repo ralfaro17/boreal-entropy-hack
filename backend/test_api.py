@@ -609,6 +609,74 @@ def test_risk_reminders_and_customer_websocket():
     print("✓ Risk reminders and customer WebSocket persistence passed")
 
 
+def test_guardrails_rejection_and_distress_escalation():
+    import json
+
+    # 1. Verify that prohibited operator threat in POST /risk-reminders/send is rejected with 400
+    res = client.get("/risk-reminders/candidates")
+    assert res.status_code == 200
+    candidates = res.json()
+    assert len(candidates) > 0
+    candidate = candidates[0]
+    cust_id = candidate["customer_id"]
+
+    illegal_reminder_res = client.post(
+        "/risk-reminders/send",
+        json={
+            "customer_id": cust_id,
+            "custom_message": "Te vamos a demandar en los tribunales y embargar tus bienes si no pagas de inmediato.",
+        },
+    )
+    assert illegal_reminder_res.status_code == 400
+    assert "violates fair debt collection guardrails" in illegal_reminder_res.json()["detail"]
+
+    # 2. Verify prohibited message injection in POST /chat/rooms/{room_id}/messages is rejected with 400
+    illegal_inject_res = client.post(
+        f"/chat/rooms/{cust_id}/messages",
+        json={
+            "sender_name": "Collections Officer",
+            "text": "Vamos a reportarte al buró de crédito y manchar tu historial.",
+        },
+    )
+    assert illegal_inject_res.status_code == 400
+    assert "violates fair debt collection guardrails" in illegal_inject_res.json()["detail"]
+
+    # 3. Test WebSocket distress detection and automated empathetic specialist escalation
+    with client.websocket_connect(f"/ws/chat/{cust_id}?sender_name=Customer") as ws:
+        # Drain initial history and join system messages
+        ws.receive_json()
+        ws.receive_json()
+
+        distress_text = "Lamentablemente perdí mi empleo y no tengo dinero para pagar la cuota este mes."
+        ws.send_text(json.dumps({"text": distress_text, "sender_name": "Customer"}))
+
+        # 1st received message: customer message echo
+        echo_msg = ws.receive_json()
+        assert echo_msg["text"] == distress_text
+
+        # 2nd received message: automated empathetic assistant escalation reply
+        asst_escalation_msg = ws.receive_json()
+        assert asst_escalation_msg["sender_name"] == "Payment Assistant"
+        assert "especialista de nuestro equipo de apoyo financiero" in asst_escalation_msg["text"]
+
+    # 4. Verify conversation is marked is_escalated=True in the database
+    conv_res = client.get("/conversations", params={"customer_id": cust_id})
+    assert conv_res.status_code == 200
+    convos = conv_res.json()
+    assert len(convos) >= 1
+    escalated_convo = convos[0]
+    assert escalated_convo["is_escalated"] is True
+
+    # 5. Verify the customer message was flagged for hardship
+    msgs_res = client.get(f"/conversations/{escalated_convo['id']}/messages")
+    assert msgs_res.status_code == 200
+    msgs = msgs_res.json()
+    assert any(m["content"] == distress_text and m["flagged"] is True for m in msgs)
+    assert any("especialista de nuestro equipo de apoyo financiero" in m["content"] for m in msgs)
+
+    print("✓ Guardrails operator rejection and WebSocket distress escalation passed")
+
+
 if __name__ == "__main__":
     test_system_endpoints()
     test_customer_crud()
@@ -619,6 +687,8 @@ if __name__ == "__main__":
     test_cascade_delete()
     test_websocket_chat_rooms()
     test_risk_reminders_and_customer_websocket()
+    test_guardrails_rejection_and_distress_escalation()
     print("\n🎉 ALL TESTS PASSED SUCCESSFULLY!")
+
 
 
