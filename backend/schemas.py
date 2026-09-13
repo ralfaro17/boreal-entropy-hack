@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 
 from models import (
     Channel,
@@ -225,3 +226,13 @@ class SendRiskReminderPayload(BaseModel):
     customer_id: str
     language: str = "es"
     custom_message: str | None = None
+
+
+class ConversationEventOut(BaseModel):
+    id: str
+    conversation_id: str
+    event_type: str
+    title: str
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None

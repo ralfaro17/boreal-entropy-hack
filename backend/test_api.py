@@ -480,12 +480,23 @@ def test_websocket_chat_rooms():
         assert msg["type"] == "system"
         assert "Alice joined" in msg["text"]
 
+        # Alice sends message in room_a
+        ws_alice.send_text(json.dumps({
+            "sender_name": "Alice",
+            "text": "Hi Bob, how can I help you today?"
+        }))
+        msg_for_alice = ws_alice.receive_json()
+        assert msg_for_alice["text"] == "Hi Bob, how can I help you today?"
+        assert msg_for_alice["sender_name"] == "Alice"
+
         # 2. Connect Bob to room_a
         with client.websocket_connect(f"/ws/chat/{room_a}?sender_name=Bob") as ws_bob:
-            # Bob receives history first
+            # Bob receives dialogue history first (containing Alice's message, but NO join/leave presence events)
             history_event = ws_bob.receive_json()
             assert history_event["type"] == "history"
-            assert len(history_event["messages"]) >= 1
+            assert len(history_event["messages"]) == 1
+            assert history_event["messages"][0]["text"] == "Hi Bob, how can I help you today?"
+            assert all(m["type"] == "message" for m in history_event["messages"])
 
             # Bob receives "Bob joined the chat"
             bob_join = ws_bob.receive_json()
@@ -497,20 +508,21 @@ def test_websocket_chat_rooms():
             assert alice_saw_bob["type"] == "system"
             assert "Bob joined" in alice_saw_bob["text"]
 
-            # 3. Alice sends message in room_a
-            ws_alice.send_text(json.dumps({
-                "sender_name": "Alice",
-                "text": "Hi Bob, how can I help you today?"
+            # 3. Bob sends a reply in room_a
+            ws_bob.send_text(json.dumps({
+                "sender_name": "Bob",
+                "text": "Thanks Alice, I have a question about my installment."
             }))
 
-            # Both Alice and Bob should receive Alice's message
-            msg_for_alice = ws_alice.receive_json()
-            assert msg_for_alice["text"] == "Hi Bob, how can I help you today?"
-            assert msg_for_alice["sender_name"] == "Alice"
+            # Both Alice and Bob should receive Bob's message
+            bob_reply_alice = ws_alice.receive_json()
+            assert bob_reply_alice["text"] == "Thanks Alice, I have a question about my installment."
+            assert bob_reply_alice["sender_name"] == "Bob"
 
-            msg_for_bob = ws_bob.receive_json()
-            assert msg_for_bob["text"] == "Hi Bob, how can I help you today?"
-            assert msg_for_bob["sender_name"] == "Alice"
+            bob_reply_bob = ws_bob.receive_json()
+            assert bob_reply_bob["text"] == "Thanks Alice, I have a question about my installment."
+            assert bob_reply_bob["sender_name"] == "Bob"
+
 
             # 4. Multi-room isolation: Connect Charlie to room_b
             with client.websocket_connect(f"/ws/chat/{room_b}?sender_name=Charlie") as ws_charlie:
@@ -599,12 +611,17 @@ def test_risk_reminders_and_customer_websocket():
         echo_msg = ws.receive_json()
         assert echo_msg["text"] == test_text
 
+        # Assistant responds with supportive message
+        asst_reply = ws.receive_json()
+        assert asst_reply["sender_name"] == "Payment Assistant"
+        assert len(asst_reply["text"]) > 0
+
     # 4. Verify message was persisted into DB conversation
     conv_res = client.get("/conversations", params={"customer_id": cust_id})
     assert conv_res.status_code == 200
     customer_convos = conv_res.json()
     assert len(customer_convos) >= 1
-    assert customer_convos[0]["last_message"] == test_text
+    assert customer_convos[0]["message_count"] >= 2
 
     print("✓ Risk reminders and customer WebSocket persistence passed")
 
@@ -674,7 +691,29 @@ def test_guardrails_rejection_and_distress_escalation():
     assert any(m["content"] == distress_text and m["flagged"] is True for m in msgs)
     assert any("especialista de nuestro equipo de apoyo financiero" in m["content"] for m in msgs)
 
-    print("✓ Guardrails operator rejection and WebSocket distress escalation passed")
+    # 6. Verify regulatory compliance audit milestones were logged in conversation_events table
+    events_res = client.get(f"/conversations/{escalated_convo['id']}/events")
+    assert events_res.status_code == 200
+    events = events_res.json()
+    assert len(events) >= 2
+    event_types = [e["event_type"] for e in events]
+    assert "customer_distress_detected" in event_types
+    assert "conversation_escalated" in event_types
+    assert "specialist_handoff" in event_types
+    assert any(e["event_type"] == "risk_reminder_triggered" for e in events)
+
+    # 7. Verify conversation record metadata has escalation timestamp and reason
+    assert escalated_convo.get("escalated_at") is not None
+    assert "Distress detected" in (escalated_convo.get("escalation_reason") or "")
+    assert escalated_convo.get("event_count", 0) >= 3
+
+    # 8. Verify the Message table strictly contains dialogue turns and NEVER transient presence events
+    assert all("joined the chat" not in m["content"] for m in msgs)
+    assert all("left the chat" not in m["content"] for m in msgs)
+    assert all(m["role"] in ("user", "assistant") for m in msgs)
+
+    print("✓ Guardrails operator rejection, distress escalation, and compliance audit events passed")
+
 
 
 if __name__ == "__main__":

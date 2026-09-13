@@ -30,10 +30,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/page-header';
 import {
   useConversations,
   useConversationMessages,
+  useConversationEvents,
   useRiskReminderCandidates,
   useSendRiskReminder,
 } from '@/hooks/useConversations';
@@ -53,6 +55,7 @@ import {
   CreditCard,
   Calendar,
   Clock,
+  ShieldCheck,
 } from 'lucide-react';
 
 export function Chat() {
@@ -70,6 +73,10 @@ export function Chat() {
   const { data: messages, isLoading: loadingMessages } = useConversationMessages(
     selectedConversation?.id ?? null
   );
+  const { data: events, isLoading: loadingEvents } = useConversationEvents(
+    selectedConversation?.id ?? null
+  );
+
 
   const { data: candidates, isLoading: loadingCandidates } = useRiskReminderCandidates();
   const sendReminder = useSendRiskReminder();
@@ -179,6 +186,7 @@ export function Chat() {
                 <TableHead>{t('chat.status')}</TableHead>
                 <TableHead>{t('chat.lastMessage')}</TableHead>
                 <TableHead>{t('chat.messages')}</TableHead>
+                <TableHead>{t('chat.auditTimelineTab')}</TableHead>
                 <TableHead>{t('chat.lastActive')}</TableHead>
                 <TableHead className="text-right pr-6">Actions</TableHead>
               </TableRow>
@@ -192,13 +200,14 @@ export function Chat() {
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-48" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-8 w-16 ml-auto" /></TableCell>
                   </TableRow>
                 ))
               ) : !filteredConversations || filteredConversations.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                     {t('chat.noConversations')}
                   </TableCell>
                 </TableRow>
@@ -238,9 +247,16 @@ export function Chat() {
                     </TableCell>
                     <TableCell>
                       {convo.is_escalated ? (
-                        <Badge variant="destructive" className="text-xs">
-                          {t('chat.escalated')}
-                        </Badge>
+                        <div className="space-y-0.5">
+                          <Badge variant="destructive" className="text-xs">
+                            {t('chat.escalated')}
+                          </Badge>
+                          {convo.escalation_reason && (
+                            <p className="text-[10px] text-muted-foreground truncate max-w-36" title={convo.escalation_reason}>
+                              {convo.escalation_reason}
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <Badge variant="secondary" className="text-xs">
                           {t('chat.normal')}
@@ -257,10 +273,20 @@ export function Chat() {
                         {convo.message_count}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      {convo.event_count && convo.event_count > 0 ? (
+                        <Badge variant="outline" className="text-xs font-mono border-primary/40 text-primary">
+                          {convo.event_count}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatDate(convo.last_message_at)}
                     </TableCell>
                     <TableCell className="text-right pr-6 space-x-2">
+
                       <Button
                         variant="outline"
                         size="sm"
@@ -453,8 +479,8 @@ export function Chat() {
         open={!!selectedConversation}
         onOpenChange={(open) => !open && setSelectedConversation(null)}
       >
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader className="pb-3 border-b">
+        <DialogContent className="sm:max-w-3xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <DialogHeader className="p-5 pb-3 border-b">
             <div className="flex items-center justify-between pr-6">
               <div>
                 <DialogTitle className="text-base flex items-center gap-2">
@@ -464,79 +490,202 @@ export function Chat() {
                 <DialogDescription className="text-xs text-muted-foreground mt-1">
                   Channel: <span className="capitalize font-medium">{selectedConversation?.channel || 'App'}</span>
                   {selectedConversation?.started_at && ` • Started ${formatDate(selectedConversation.started_at)}`}
+                  {selectedConversation?.escalated_at && ` • Escalated ${formatDate(selectedConversation.escalated_at)}`}
                 </DialogDescription>
               </div>
               {selectedConversation?.is_escalated && (
-                <Badge variant="destructive" className="flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  {t('chat.escalated')}
-                </Badge>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge variant="destructive" className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    {t('chat.escalated')}
+                  </Badge>
+                  {selectedConversation?.escalation_reason && (
+                    <span className="text-[10px] text-muted-foreground max-w-64 truncate" title={selectedConversation.escalation_reason}>
+                      {selectedConversation.escalation_reason}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </DialogHeader>
 
-          {/* Message History */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-75 max-h-[55vh]">
-            {loadingMessages ? (
-              <div className="space-y-3">
-                <Skeleton className="h-16 w-3/4" />
-                <Skeleton className="h-16 w-3/4 ml-auto" />
-                <Skeleton className="h-16 w-2/3" />
-              </div>
-            ) : !messages || messages.length === 0 ? (
-              <div className="text-center text-muted-foreground py-12 text-sm">
-                No messages found for this conversation.
-              </div>
-            ) : (
-              messages.map((msg) => {
-                const isUser = msg.role === 'user';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
-                  >
-                    <div className="flex items-center gap-1.5 mb-1 px-1">
-                      {isUser ? (
-                        <>
-                          <span className="text-xs font-medium text-muted-foreground">
-                            {selectedConversation?.customer_name || 'Customer'}
-                          </span>
-                          <User className="h-3.5 w-3.5 text-muted-foreground" />
-                        </>
-                      ) : (
-                        <>
-                          <Bot className="h-3.5 w-3.5 text-primary" />
-                          <span className="text-xs font-medium text-primary">
-                            Payment Assistant
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div
-                      className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
-                        isUser
-                          ? 'bg-primary text-primary-foreground rounded-tr-none'
-                          : 'bg-muted text-foreground rounded-tl-none'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                      {msg.flagged && (
-                        <div className="mt-2 pt-2 border-t border-destructive/30 flex items-center gap-1 text-xs text-destructive font-medium">
-                          <AlertTriangle className="h-3.5 w-3.5" />
-                          Flagged for human review
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground px-1 mt-1">
-                      {formatDate(msg.created_at)}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          {/* Navigation Tabs */}
+          <Tabs defaultValue="messages" className="flex-1 flex flex-col min-h-0">
+            <div className="px-5 pt-3 pb-1 border-b bg-muted/20">
+              <TabsList>
+                <TabsTrigger value="messages" className="gap-2 text-xs">
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>{t('chat.messagesTab')}</span>
+                  {messages && (
+                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5 ml-1">
+                      {messages.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="events" className="gap-2 text-xs">
+                  <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                  <span>{t('chat.auditTimelineTab')}</span>
+                  {events && (
+                    <Badge variant="outline" className="text-[10px] py-0 px-1.5 ml-1 border-primary/40 text-primary">
+                      {events.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-          <div className="border-t pt-3 flex flex-wrap items-center justify-between gap-2">
+            {/* Messages Tab: Dialogue Only */}
+            <TabsContent value="messages" className="flex-1 overflow-y-auto p-5 space-y-4 m-0 min-h-75 max-h-[55vh]">
+              {loadingMessages ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-16 w-3/4" />
+                  <Skeleton className="h-16 w-3/4 ml-auto" />
+                  <Skeleton className="h-16 w-2/3" />
+                </div>
+              ) : !messages || messages.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12 text-sm">
+                  No messages found for this conversation.
+                </div>
+              ) : (
+                messages.map((msg) => {
+                  const isUser = msg.role === 'user';
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1 px-1">
+                        {isUser ? (
+                          <>
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {selectedConversation?.customer_name || 'Customer'}
+                            </span>
+                            <User className="h-3.5 w-3.5 text-muted-foreground" />
+                          </>
+                        ) : (
+                          <>
+                            <Bot className="h-3.5 w-3.5 text-primary" />
+                            <span className="text-xs font-medium text-primary">
+                              Payment Assistant
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <div
+                        className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
+                          isUser
+                            ? 'bg-primary text-primary-foreground rounded-tr-none'
+                            : 'bg-muted text-foreground rounded-tl-none'
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                        {msg.flagged && (
+                          <div className="mt-2 pt-2 border-t border-destructive/30 flex items-center gap-1 text-xs text-destructive font-medium">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Flagged for human review
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground px-1 mt-1">
+                        {formatDate(msg.created_at)}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </TabsContent>
+
+            {/* Audit & Compliance Timeline Tab */}
+            <TabsContent value="events" className="flex-1 overflow-y-auto p-5 space-y-3 m-0 min-h-75 max-h-[55vh]">
+              <div className="rounded-md bg-muted/40 border border-border/60 p-3 text-xs text-muted-foreground flex items-start gap-2.5 mb-2">
+                <ShieldCheck className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                <p>
+                  {t('chat.auditTimelineDesc')}
+                </p>
+              </div>
+
+              {loadingEvents ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-14 w-full" />
+                  <Skeleton className="h-14 w-full" />
+                  <Skeleton className="h-14 w-full" />
+                </div>
+              ) : !events || events.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12 text-sm">
+                  {t('chat.noAuditEvents')}
+                </div>
+              ) : (
+                <div className="relative border-l-2 border-border/80 ml-4 pl-4 space-y-4 py-1">
+                  {events.map((evt) => {
+                    const isEscalation = evt.event_type.includes('escalated') || evt.event_type.includes('distress');
+                    const isHandoff = evt.event_type.includes('handoff');
+                    const isFlagged = evt.event_type.includes('guardrail') || evt.event_type.includes('blocked');
+                    const isReminder = evt.event_type.includes('reminder');
+
+                    return (
+                      <div key={evt.id} className="relative group">
+                        {/* Timeline dot */}
+                        <div
+                          className={`absolute -left-[23px] top-1 h-3.5 w-3.5 rounded-full border-2 border-background ${
+                            isEscalation || isFlagged
+                              ? 'bg-destructive'
+                              : isHandoff
+                              ? 'bg-primary'
+                              : isReminder
+                              ? 'bg-amber-500'
+                              : 'bg-muted-foreground'
+                          }`}
+                        />
+                        <div className="rounded-lg border bg-card p-3.5 shadow-sm space-y-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-foreground">
+                                {evt.title}
+                              </span>
+                              <Badge
+                                variant={
+                                  isEscalation || isFlagged
+                                    ? 'destructive'
+                                    : isHandoff
+                                    ? 'default'
+                                    : 'secondary'
+                                }
+                                className="text-[10px] py-0 px-1.5 uppercase font-mono"
+                              >
+                                {evt.event_type.replace(/_/g, ' ')}
+                              </Badge>
+                            </div>
+                            <span className="text-[11px] text-muted-foreground font-mono">
+                              {formatDate(evt.created_at)}
+                            </span>
+                          </div>
+
+                          {evt.description && (
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              {evt.description}
+                            </p>
+                          )}
+
+                          {evt.metadata && Object.keys(evt.metadata).length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-border/50 text-[11px] font-mono bg-muted/30 p-2 rounded">
+                              <span className="text-muted-foreground block mb-1 font-sans font-medium text-[10px] uppercase">
+                                {t('chat.auditMetadata')}:
+                              </span>
+                              <pre className="text-[10px] overflow-x-auto text-muted-foreground leading-tight">
+                                {JSON.stringify(evt.metadata, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+
+          <div className="border-t p-3 bg-muted/10 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {selectedConversation?.customer_id && (
                 <>
@@ -578,6 +727,7 @@ export function Chat() {
           </div>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }

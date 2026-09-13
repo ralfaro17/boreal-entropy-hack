@@ -798,6 +798,32 @@ def get_or_create_active_conversation(db: Session, customer_id: str) -> models.C
     return convo
 
 
+def record_conversation_event(
+    db: Session,
+    conversation_id: str,
+    event_type: models.ConversationEventType,
+    title: str,
+    description: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> models.ConversationEvent:
+    """Record a regulatory or compliance audit milestone in the dedicated conversation_events table.
+    Ensures compliance audits and supervisor timelines are fully documented without polluting
+    the Message table or LLM context windows.
+    """
+    event = models.ConversationEvent(
+        conversation_id=conversation_id,
+        event_type=event_type,
+        title=title,
+        description=description,
+        metadata_json=json.dumps(metadata) if metadata else None,
+        created_at=datetime.utcnow(),
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
 async def generate_risk_reminder(
     customer: models.Customer,
     payment: models.Payment,
@@ -896,6 +922,115 @@ async def generate_risk_reminder(
                 f"Hi {customer.full_name}, friendly reminder that your upcoming installment of ${amount_due:.2f} "
                 f"is scheduled for {due_date_str}. If you'd like to adjust your schedule or review payment options, we're here to help."
             )
+
+
+async def generate_customer_chat_reply(
+    db: Session,
+    customer: models.Customer | None,
+    convo: models.Conversation,
+    user_message: str,
+) -> str:
+    """Generate a supportive, compliant response from the payment assistant to a customer's message."""
+    # Detect language: if English keywords found, respond in English, otherwise default to Spanish
+    lang = "es"
+    if re.search(r"\b(hello|hi|help|due|payment|reschedule|can i|thank|how much)\b", user_message.lower()):
+        lang = "en"
+
+    payment = None
+    hardship = False
+    streak = 0
+    cust_name = customer.full_name if customer else "Cliente"
+
+    if customer:
+        payment = (
+            db.query(models.Payment)
+            .join(models.Account)
+            .filter(models.Account.customer_id == customer.id)
+            .filter(models.Payment.payment_date.is_(None))
+            .order_by(models.Payment.due_date.asc())
+            .first()
+        )
+        risk = (
+            db.query(models.RiskFeature)
+            .filter_by(customer_id=customer.id)
+            .order_by(models.RiskFeature.as_of_date.desc())
+            .first()
+        )
+        act = (
+            db.query(models.AccountActivity)
+            .filter_by(customer_id=customer.id)
+            .order_by(models.AccountActivity.snapshot_date.desc())
+            .first()
+        )
+        hardship = act.hardship_flag if act else False
+        streak = risk.missed_payment_streak if risk else 0
+
+    amount_str = f"${float(payment.amount_due):.2f}" if payment else "pendiente"
+    due_str = payment.due_date.strftime("%d/%m/%Y") if payment else "próximo"
+
+    if ai_client:
+        if lang == "es":
+            sys_prompt = (
+                f"Eres el asistente bancario de apoyo y prevención de endeudamiento de Boreal Bank. "
+                f"Estás respondiendo a un mensaje de chat de {cust_name}. "
+                f"Contexto: cuota de {amount_str} con vencimiento el {due_str}. "
+                f"Reglas estrictas e inviolables de cumplimiento: "
+                f"- Escribe en español un mensaje breve (menos de 60 palabras), cálido, empático y orientado a soluciones. "
+                f"- Jamás amenaces con demandas, juicios, embargos, cobradores ni buró de crédito. "
+                f"- Jamás juzgues ni avergüences al cliente. "
+                f"- Si el cliente pregunta cómo pagar, reprogramar o resolver su situación, ofrece opciones concretas "
+                f"(pago en parcialidades, extensión de fecha o contactar a un especialista financiero). "
+                f"- Termina con una pregunta o siguiente paso sencillo y de apoyo."
+            )
+        else:
+            sys_prompt = (
+                f"You are the supportive debt-prevention assistant for Boreal Bank. "
+                f"You are responding to a chat message from {cust_name}. "
+                f"Context: installment of {amount_str} due on {due_str}. "
+                f"Strict compliance rules: "
+                f"- Write a short (under 60 words), warm, supportive, and solution-oriented reply in English. "
+                f"- Never threaten legal action, wage garnishment, asset seizure, or credit bureau damage. "
+                f"- Never judge or shame the customer. "
+                f"- If the customer asks how to pay, reschedule, or resolve their debt, offer flexible alternatives "
+                f"(split payments, date extension, or connecting with a specialist). "
+                f"- End with a concrete, low-friction next step."
+            )
+
+        # Build recent message turns for conversational context
+        turns = []
+        for m in convo.messages[-6:]:
+            role = "user" if m.role == models.MessageRole.USER else "assistant"
+            turns.append({"role": role, "content": m.content})
+
+        if not turns or turns[-1]["content"] != user_message:
+            turns.append({"role": "user", "content": user_message})
+
+        try:
+            res = await ai_client.messages.create(
+                model="deepseek-chat",
+                max_tokens=150,
+                system=sys_prompt,
+                messages=turns,
+            )
+            candidate = res.content[0].text.strip()
+            if candidate and not output_violates_guardrails(candidate):
+                return candidate
+        except Exception as e:
+            print(f"Error calling LLM for customer chat: {e}")
+
+    # Fallback response
+    if lang == "es":
+        return (
+            f"Hola {cust_name}, con gusto te orientamos. Para tu cuota de {amount_str}, "
+            f"podemos explorar alternativas como un pago parcial o una prórroga de fecha. "
+            f"¿Deseas que coordinemos una opción flexible o prefieres hablar con un asesor especializado?"
+        )
+    else:
+        return (
+            f"Hello {cust_name}, we are happy to help. For your installment of {amount_str}, "
+            f"we can look into a partial payment arrangement or extending the due date. "
+            f"Would you like to review flexible options or speak with a specialist?"
+        )
 
 
 def get_risk_reminder_candidates(db: Session) -> list[dict[str, Any]]:
@@ -1043,8 +1178,9 @@ async def websocket_chat_endpoint(
                             else models.MessageRole.ASSISTANT
                         )
                         is_distressed = False
+                        distress_cats: list[str] = []
                         if is_customer_msg:
-                            is_distressed, _ = detect_customer_distress(cleaned_text)
+                            is_distressed, distress_cats = detect_customer_distress(cleaned_text)
 
                         db_msg = models.Message(
                             conversation_id=active_convo.id,
@@ -1057,6 +1193,27 @@ async def websocket_chat_endpoint(
 
                         if is_distressed:
                             active_convo.is_escalated = True
+                            active_convo.escalated_at = datetime.utcnow()
+                            active_convo.escalation_reason = f"Distress detected in categories: {', '.join(distress_cats)}"
+                            record_conversation_event(
+                                db=db,
+                                conversation_id=active_convo.id,
+                                event_type=models.ConversationEventType.CUSTOMER_DISTRESS_DETECTED,
+                                title="Customer Distress Detected",
+                                description=f"Customer expressed financial distress/hardship ({', '.join(distress_cats)}).",
+                                metadata={
+                                    "categories": distress_cats,
+                                    "trigger_snippet": cleaned_text[:200],
+                                },
+                            )
+                            record_conversation_event(
+                                db=db,
+                                conversation_id=active_convo.id,
+                                event_type=models.ConversationEventType.CONVERSATION_ESCALATED,
+                                title="Conversation Escalated to Human Specialist",
+                                description="Automated AI debt-prevention paused; customer routed to human hardship specialist.",
+                                metadata={"reason": active_convo.escalation_reason},
+                            )
 
                         active_convo.last_message_at = datetime.utcnow()
                         db.commit()
@@ -1067,6 +1224,35 @@ async def websocket_chat_endpoint(
                             if re.search(r"\b(job|money|afford|hospital|evict|funeral|laid off)\b", cleaned_text.lower()):
                                 lang = "en"
                             reply_text = get_escalation_reply(lang)
+                            asst_db_msg = models.Message(
+                                conversation_id=active_convo.id,
+                                role=models.MessageRole.ASSISTANT,
+                                content=reply_text,
+                                created_at=datetime.utcnow(),
+                                was_flagged=False,
+                            )
+                            db.add(asst_db_msg)
+                            active_convo.last_message_at = datetime.utcnow()
+                            db.commit()
+                            escalation_msg = reply_text
+
+                            record_conversation_event(
+                                db=db,
+                                conversation_id=active_convo.id,
+                                event_type=models.ConversationEventType.SPECIALIST_HANDOFF,
+                                title="Specialist Handoff Notice Dispatched",
+                                description="Empathetic handoff message delivered to customer confirming human team referral.",
+                                metadata={"language": lang},
+                            )
+
+                        elif is_customer_msg:
+                            # Generate conversational reply from AI assistant
+                            reply_text = await generate_customer_chat_reply(
+                                db=db,
+                                customer=customer,
+                                convo=active_convo,
+                                user_message=cleaned_text,
+                            )
                             asst_db_msg = models.Message(
                                 conversation_id=active_convo.id,
                                 role=models.MessageRole.ASSISTANT,
@@ -1147,6 +1333,7 @@ def list_conversations(
         .options(
             joinedload(models.Conversation.customer),
             selectinload(models.Conversation.messages),
+            selectinload(models.Conversation.events),
         )
         .order_by(models.Conversation.last_message_at.desc())
     )
@@ -1165,7 +1352,10 @@ def list_conversations(
             "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None,
             "channel": c.channel.value if c.channel else "app",
             "is_escalated": c.is_escalated,
+            "escalated_at": c.escalated_at.isoformat() if c.escalated_at else None,
+            "escalation_reason": c.escalation_reason,
             "message_count": len(c.messages),
+            "event_count": len(c.events) if c.events else 0,
             "last_message": last_msg,
         })
     return result
@@ -1189,6 +1379,36 @@ def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db
         }
         for m in convo.messages
     ]
+
+
+@app.get("/conversations/{conversation_id}/events", tags=["Chat"])
+@app.get("/chat/conversations/{conversation_id}/events", tags=["Chat"])
+def get_conversation_events(conversation_id: str, db: Session = Depends(get_db)):
+    """Retrieve all compliance and audit milestone events for a conversation.
+    Dedicated regulatory audit trail decoupled from dialogue turns and LLM context.
+    """
+    convo = db.get(models.Conversation, conversation_id)
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    events = (
+        db.query(models.ConversationEvent)
+        .filter_by(conversation_id=conversation_id)
+        .order_by(models.ConversationEvent.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "id": e.id,
+            "conversation_id": e.conversation_id,
+            "event_type": e.event_type.value,
+            "title": e.title,
+            "description": e.description,
+            "metadata": json.loads(e.metadata_json) if e.metadata_json else None,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in events
+    ]
+
 
 
 @app.get("/risk-reminders/candidates", tags=["Chat"])
@@ -1253,6 +1473,16 @@ async def send_risk_reminder(payload: schemas.SendRiskReminderPayload, db: Sessi
     convo = get_or_create_active_conversation(db, customer.id)
     if activity and activity.hardship_flag:
         convo.is_escalated = True
+        convo.escalated_at = datetime.utcnow()
+        convo.escalation_reason = "Customer hardship flag present in account activity"
+        record_conversation_event(
+            db=db,
+            conversation_id=convo.id,
+            event_type=models.ConversationEventType.CONVERSATION_ESCALATED,
+            title="Conversation Escalated to Specialist",
+            description="Conversation marked for specialist review due to active hardship flag.",
+            metadata={"source": "account_activity", "hardship_flag": True},
+        )
 
     # Persist message
     db_msg = models.Message(
@@ -1266,6 +1496,34 @@ async def send_risk_reminder(payload: schemas.SendRiskReminderPayload, db: Sessi
     convo.last_message_at = datetime.utcnow()
     db.commit()
     db.refresh(db_msg)
+
+    # Record compliance audit milestone
+    record_conversation_event(
+        db=db,
+        conversation_id=convo.id,
+        event_type=models.ConversationEventType.RISK_REMINDER_TRIGGERED,
+        title="Proactive AI Risk Reminder Dispatched",
+        description=f"Automated risk reminder sent to {customer.full_name} for pending installment.",
+        metadata={
+            "customer_id": customer.id,
+            "payment_id": payment.id,
+            "amount_due": float(payment.amount_due),
+            "due_date": payment.due_date.isoformat(),
+            "was_flagged": was_flagged,
+            "language": payload.language or "es",
+        },
+    )
+
+    if was_flagged:
+        record_conversation_event(
+            db=db,
+            conversation_id=convo.id,
+            event_type=models.ConversationEventType.GUARDRAIL_VIOLATION_BLOCKED,
+            title="Guardrail Flagged Output",
+            description=f"Automated reminder flagged by internal guardrail: {violation}",
+            metadata={"violation": violation},
+        )
+
 
     # Broadcast to customer's WebSocket room
     ws_msg = chat_manager.format_message(

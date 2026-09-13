@@ -153,7 +153,11 @@ export const conversationsApi = {
 
   getMessages: (conversationId: string) =>
     request<ConversationMessage[]>(`/conversations/${conversationId}/messages`),
+
+  getEvents: (conversationId: string) =>
+    request<ConversationEvent[]>(`/conversations/${conversationId}/events`),
 };
+
 
 // Risk Reminders
 export const riskRemindersApi = {
@@ -402,8 +406,21 @@ export interface Conversation {
   last_message_at: string | null;
   channel: Channel | null;
   is_escalated: boolean;
+  escalated_at?: string | null;
+  escalation_reason?: string | null;
   message_count: number;
+  event_count?: number;
   last_message: string | null;
+}
+
+export interface ConversationEvent {
+  id: string;
+  conversation_id: string;
+  event_type: string;
+  title: string;
+  description: string | null;
+  metadata: Record<string, any> | null;
+  created_at: string | null;
 }
 
 export interface ConversationMessage {
@@ -414,6 +431,7 @@ export interface ConversationMessage {
   created_at: string | null;
   flagged: boolean;
 }
+
 
 export interface RiskReminderCandidate {
   customer_id: string;

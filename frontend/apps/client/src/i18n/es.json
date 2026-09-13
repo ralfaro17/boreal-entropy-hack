@@ -139,8 +139,16 @@
     "reminderSentError": "Error al enviar el recordatorio de riesgo",
     "noCandidates": "No se encontraron clientes en riesgo con cuotas pendientes",
     "openCustomerChat": "Portal Cliente",
-    "respondAsCustomer": "Responder como Cliente"
+    "respondAsCustomer": "Responder como Cliente",
+    "messagesTab": "Mensajes",
+    "auditTimelineTab": "Línea de Auditoría y Cumplimiento",
+    "auditTimelineDesc": "Hitos regulatorios y de auditoría registrados de forma independiente del contexto del LLM y el diálogo.",
+    "noAuditEvents": "No hay hitos regulatorios o de cumplimiento registrados aún.",
+    "auditEvent": "Hito de auditoría",
+    "auditMetadata": "Metadatos y señales",
+    "escalatedReason": "Motivo"
   },
+
   "employment": {
     "employed": "Empleado",
     "self_employed": "Independiente",

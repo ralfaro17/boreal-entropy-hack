@@ -46,7 +46,10 @@ class ConnectionManager:
         self.active_connections[room_id][websocket] = sender_name
 
         if room_id not in self.history and initial_history:
-            self.history[room_id] = list(initial_history)
+            # Filter strictly to dialogue messages, excluding any transient presence events
+            self.history[room_id] = [
+                m for m in initial_history if m.get("type", "message") == "message"
+            ]
 
         # Send existing message history to the newly connected participant
         history_msgs = self.get_history(room_id)
@@ -57,14 +60,14 @@ class ConnectionManager:
                 "messages": history_msgs,
             })
 
-        # Broadcast join notification to all users in the room
+        # Broadcast transient join notification live to the room without saving to persistent history
         system_msg = self.format_message(
             room_id=room_id,
             sender_name="System",
             text=f"{sender_name} joined the chat",
             msg_type="system",
         )
-        await self.broadcast(room_id, system_msg)
+        await self.broadcast(room_id, system_msg, save_to_history=False)
 
     async def disconnect(self, websocket: WebSocket, room_id: str):
         sender_name = "User"
@@ -73,21 +76,25 @@ class ConnectionManager:
             if not self.active_connections[room_id]:
                 del self.active_connections[room_id]
 
+        # Broadcast transient leave notification without saving to persistent history
         system_msg = self.format_message(
             room_id=room_id,
             sender_name="System",
             text=f"{sender_name} left the chat",
             msg_type="system",
         )
-        await self.broadcast(room_id, system_msg)
+        await self.broadcast(room_id, system_msg, save_to_history=False)
 
-    async def broadcast(self, room_id: str, message: dict[str, Any]):
-        # Save message into room history
-        if room_id not in self.history:
-            self.history[room_id] = []
-        self.history[room_id].append(message)
-        if len(self.history[room_id]) > self.max_history:
-            self.history[room_id] = self.history[room_id][-self.max_history:]
+    async def broadcast(self, room_id: str, message: dict[str, Any], save_to_history: bool = True):
+        # ONLY save genuine dialogue messages to conversation history.
+        # Transient presence events (joins, leaves, typing) are broadcast live to connected sockets
+        # but NEVER persisted in conversation history, preventing LLM token pollution and DB bloat.
+        if save_to_history and message.get("type") == "message":
+            if room_id not in self.history:
+                self.history[room_id] = []
+            self.history[room_id].append(message)
+            if len(self.history[room_id]) > self.max_history:
+                self.history[room_id] = self.history[room_id][-self.max_history:]
 
         # Broadcast to all live WebSockets in the room
         connections = list(self.active_connections.get(room_id, {}).keys())

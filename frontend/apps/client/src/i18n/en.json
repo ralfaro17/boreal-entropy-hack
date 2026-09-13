@@ -139,8 +139,16 @@
     "reminderSentError": "Failed to send risk reminder",
     "noCandidates": "No at-risk customers with pending installments found",
     "openCustomerChat": "Customer Chat",
-    "respondAsCustomer": "Respond as Customer"
+    "respondAsCustomer": "Respond as Customer",
+    "messagesTab": "Messages",
+    "auditTimelineTab": "Compliance & Audit Timeline",
+    "auditTimelineDesc": "Regulatory audit milestones logged independently from LLM context and customer dialogue.",
+    "noAuditEvents": "No regulatory or compliance milestones recorded yet.",
+    "auditEvent": "Milestone Event",
+    "auditMetadata": "Metadata & Signals",
+    "escalatedReason": "Reason"
   },
+
   "employment": {
     "employed": "Employed",
     "self_employed": "Self-employed",

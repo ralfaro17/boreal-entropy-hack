@@ -16,6 +16,14 @@ export function useConversationMessages(conversationId: string | null) {
   });
 }
 
+export function useConversationEvents(conversationId: string | null) {
+  return useQuery({
+    queryKey: ['conversation-events', conversationId],
+    queryFn: () => (conversationId ? conversationsApi.getEvents(conversationId) : Promise.resolve([])),
+    enabled: !!conversationId,
+  });
+}
+
 export function useRiskReminderCandidates() {
   return useQuery({
     queryKey: ['risk-reminder-candidates'],
@@ -32,6 +40,8 @@ export function useSendRiskReminder() {
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['risk-reminder-candidates'] });
       queryClient.invalidateQueries({ queryKey: ['conversation-messages'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation-events'] });
     },
   });
 }
+

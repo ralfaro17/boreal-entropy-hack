@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
 )
 from database import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -223,6 +224,15 @@ class MessageRole(str, enum.Enum):
     SYSTEM = "system"
 
 
+class ConversationEventType(str, enum.Enum):
+    RISK_REMINDER_TRIGGERED = "risk_reminder_triggered"
+    CUSTOMER_DISTRESS_DETECTED = "customer_distress_detected"
+    CONVERSATION_ESCALATED = "conversation_escalated"
+    SPECIALIST_HANDOFF = "specialist_handoff"
+    COMPLIANCE_DISCLAIMER = "compliance_disclaimer"
+    GUARDRAIL_VIOLATION_BLOCKED = "guardrail_violation_blocked"
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -232,21 +242,46 @@ class Conversation(Base):
     last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     channel: Mapped[Channel | None] = mapped_column(Enum(Channel), nullable=True)
     is_escalated: Mapped[bool] = mapped_column(Boolean, default=False)
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    escalation_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(
         back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan"
     )
+    events: Mapped[list["ConversationEvent"]] = relationship(
+        back_populates="conversation", order_by="ConversationEvent.created_at", cascade="all, delete-orphan"
+    )
 
 
 class Message(Base):
+    """Dialogue turns strictly between customer and assistant.
+    Transient presence events (joins, leaves, typing) are excluded to preserve LLM context and clean dialogue.
+    """
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"))
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
     role: Mapped[MessageRole] = mapped_column(Enum(MessageRole))
     content: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     was_flagged: Mapped[bool] = mapped_column(Boolean, default=False)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class ConversationEvent(Base):
+    """Regulatory and compliance audit log for conversation milestones.
+    Recorded in a dedicated table so compliance audits never pollute LLM context windows or dialogue rendering.
+    """
+    __tablename__ = "conversation_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[ConversationEventType] = mapped_column(Enum(ConversationEventType))
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="events")

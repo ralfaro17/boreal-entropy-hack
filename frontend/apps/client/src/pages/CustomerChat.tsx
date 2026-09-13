@@ -41,6 +41,8 @@ export function CustomerChat() {
   const { data: customer, isLoading: loadingCustomer } = useCustomer(customerId || '');
 
   const customerName = customer?.full_name || 'Customer';
+  const customerNameRef = useRef(customerName);
+  customerNameRef.current = customerName;
 
   // WebSocket and messages state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -48,6 +50,7 @@ export function CustomerChat() {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [hasEscalated, setHasEscalated] = useState(false);
+  const [isWaitingForAssistant, setIsWaitingForAssistant] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -59,7 +62,7 @@ export function CustomerChat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isWaitingForAssistant]);
 
   // Connect WebSocket
   useEffect(() => {
@@ -69,9 +72,7 @@ export function CustomerChat() {
     setIsConnecting(true);
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/chat/${customerId}?sender_name=${encodeURIComponent(
-      customerName
-    )}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat/${customerId}?sender_name=Customer`;
 
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
@@ -98,8 +99,9 @@ export function CustomerChat() {
             setHasEscalated(true);
           }
         } else if (data.type === 'message') {
+          setIsWaitingForAssistant(false);
           setMessages((prev) => {
-            // Avoid duplicate appends if message already exists with same id or identical text and recent timestamp
+            // Avoid duplicate appends if message already exists with same id
             if (data.id && prev.some((m) => m.id === data.id)) {
               return prev;
             }
@@ -124,8 +126,7 @@ export function CustomerChat() {
       setIsConnecting(false);
     };
 
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
+    ws.onerror = () => {
       if (!isMounted) return;
       setIsConnected(false);
       setIsConnecting(false);
@@ -133,9 +134,15 @@ export function CustomerChat() {
 
     return () => {
       isMounted = false;
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'Component unmounted');
+      } else if (ws.readyState === WebSocket.CONNECTING) {
+        ws.onopen = () => {
+          ws.close(1000, 'Component unmounted');
+        };
+      }
     };
-  }, [customerId, customerName]);
+  }, [customerId]);
 
   const handleSendMessage = (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
@@ -145,11 +152,12 @@ export function CustomerChat() {
 
     const payload = {
       text,
-      sender_name: customerName,
+      sender_name: customerNameRef.current || 'Customer',
     };
 
     socketRef.current.send(JSON.stringify(payload));
     setInputMessage('');
+    setIsWaitingForAssistant(true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -404,6 +412,27 @@ export function CustomerChat() {
               );
             })
           )}
+
+          {/* Assistant Typing Indicator */}
+          {isWaitingForAssistant && (
+            <div className="flex flex-col items-start animate-in fade-in">
+              <div className="flex items-center gap-1.5 mb-1 px-1 text-xs">
+                <div className="h-4 w-4 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                  <Bot className="h-3 w-3" />
+                </div>
+                <span className="font-medium text-primary">Payment Assistant</span>
+              </div>
+              <div className="bg-card border text-card-foreground rounded-2xl rounded-tl-xs px-4 py-2.5 shadow-2xs flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
+                <span className="text-xs text-muted-foreground ml-2">
+                  {isSpanish ? 'Escribiendo respuesta...' : 'Thinking...'}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
